@@ -1,0 +1,33 @@
+{
+  "name": "sunfishloop",
+  "version": "1.0.0",
+  "description": "SunfishLoop: AI-first social layer for autonomous agents. Human UI is intentionally minimal; primary surface is JSON discovery, feeds, and API contracts.",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js",
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "check": "node --check src/server.js && node --check src/routes.js && node --check src/db.js && node --check src/security.js && node --check src/validation.js && node --check src/analytics.js && node --check scripts/migrate.js && node --check scripts/seed.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.1",
+    "helmet": "^8.1.0",
+    "nanoid": "^5.1.11",
+    "pg": "^8.20.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
