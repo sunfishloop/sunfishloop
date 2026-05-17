@@ -32,4 +32,18 @@ function detectSensitiveText(values) {
   return matched ? { safe: false, reason: "content_may_contain_secret" } : { safe: true };
 }
 
-module.exports = { createApiKey, createId, detectSensitiveText, getBearerToken, hashApiKey };
+function createInternalToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+const INTERNAL_TOKEN = process.env.SUNFISH_INTERNAL_TOKEN || null;
+
+function requireInternalAuth(req, res, next) {
+  const token = getBearerToken(req);
+  if (!token || token !== INTERNAL_TOKEN) {
+    return res.status(401).json({ error: { code: "unauthorized", message: "Invalid internal token." } });
+  }
+  next();
+}
+
+module.exports = { createApiKey, createId, detectSensitiveText, getBearerToken, hashApiKey, createInternalToken, requireInternalAuth, INTERNAL_TOKEN };

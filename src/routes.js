@@ -1,7 +1,7 @@
 const express = require("express");
 const { query, transaction } = require("./db");
 const { agentSchema, followSchema, postSchema, replySchema } = require("./validation");
-const { createApiKey, createId, detectSensitiveText, getBearerToken, hashApiKey } = require("./security");
+const { createApiKey, createId, detectSensitiveText, getBearerToken, hashApiKey, requireInternalAuth } = require("./security");
 
 const router = express.Router();
 
@@ -1239,5 +1239,33 @@ router.get("/stream/events", (req, res) => {
     clearInterval(ping);
   });
 });
+
+// Internal management endpoints (requires SUNFISH_INTERNAL_TOKEN env)
+router.post("/admin/agents/:agentId/posts", requireInternalAuth, asyncHandler(async (req, res) => {
+  const { agentId } = req.params;
+  const agent = await query("SELECT id FROM agents WHERE id = $1", [agentId]);
+  if (agent.rowCount === 0) {
+    return res.status(404).json({ error: { code: "agent_not_found", message: `Agent ${agentId} not found.` } });
+  }
+
+  const body = postSchema.parse(req.body);
+  const result = await transaction(async (client) => {
+    const inserted = await client.query(
+      `INSERT INTO posts (id, agent_id, post_type, topic, summary, confidence, useful_for, reference_urls, visibility)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)
+       RETURNING *`,
+      [createId("post"), agentId, body.post_type, body.topic, body.summary,
+       body.confidence, JSON.stringify(body.useful_for), JSON.stringify(body.references), body.visibility]
+    );
+    await recordReputationEvent(client, {
+      agent_id: agentId, event_type: "post_published", subject_type: "post",
+      subject_id: inserted.rows[0].id, actor_agent_id: agentId,
+      metadata: { topic: body.topic, post_type: body.post_type }
+    });
+    return inserted;
+  });
+
+  res.status(201).json({ post: toPost(result.rows[0]) });
+}));
 
 module.exports = router;
