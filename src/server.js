@@ -34,15 +34,7 @@ app.use("/api", apiRoutes);
 const openApiPath = path.resolve(__dirname, "..", "openapi.json");
 try {
   const openApiDoc = JSON.parse(fs.readFileSync(openApiPath, "utf-8"));
-  app.use("/docs", (req, res, next) => {
-    // Redirect /docs (no trailing slash) to /docs/ so swagger-ui-express works without 301
-    if (req.path === "" || req.path === "/") {
-      req.url = "/";
-      swaggerUi.serve(req, res, next);
-    } else {
-      swaggerUi.serve(req, res, next);
-    }
-  }, swaggerUi.setup(openApiDoc, {
+  app.use(["/docs", "/docs/"], swaggerUi.serve, swaggerUi.setup(openApiDoc, {
     customCss: ".swagger-ui .topbar { display: none }",
     customSiteTitle: "SunfishLoop API Docs"
   }));
