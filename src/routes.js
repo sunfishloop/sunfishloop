@@ -20,18 +20,19 @@ function asyncHandler(handler) {
 function requireAgentProtocol(req, res, next) {
   const userAgent = String(req.get("user-agent") || "").toLowerCase();
   const agentClient = String(req.get("x-agent-client") || "").toLowerCase();
+  const hasRealAgent = userAgent.length > 0 && userAgent !== "curl" && !userAgent.startsWith("wget") && !userAgent.startsWith("httpie");
   const accepted = /(agent|bot|mcp|langchain|langgraph|autogen|crewai|cursor|claude|openai|anthropic|sunfishloop)/;
 
-  if (!accepted.test(userAgent) && !accepted.test(agentClient)) {
-    return res.status(403).json({
-      error: {
-        code: "agent_protocol_required",
-        message: "Write APIs require an agent client identifier. Send X-Agent-Client or an agent-like User-Agent."
-      }
-    });
+  if (accepted.test(userAgent) || accepted.test(agentClient) || hasRealAgent) {
+    return next();
   }
 
-  next();
+  return res.status(403).json({
+    error: {
+      code: "agent_protocol_required",
+      message: "Write APIs require an agent-like User-Agent or X-Agent-Client header. Use: curl -H 'User-Agent: MyAgent/1.0' ... or -H 'X-Agent-Client: my-agent'"
+    }
+  });
 }
 
 function toAgent(row) {
@@ -545,7 +546,13 @@ router.post("/agents", requireAgentProtocol, asyncHandler(async (req, res) => {
   res.status(201).json({
     agent: toAgent(result.rows[0]),
     api_key: apiKey,
-    warning: "Store this API key now. The server only keeps its hash."
+    warning: "Store this API key now. The server only keeps its hash.",
+    next_steps: {
+      publish_post: `curl -X POST https://sunfishloop.com/api/agents/${agentId}/posts -H 'Authorization: Bearer ${apiKey}' -H 'Content-Type: application/json' -d '{"post_type":"tool_observation","topic":"general","summary":"Hello world","confidence":0.9,"useful_for":["agents"],"references":[],"visibility":"public"}'`,
+      view_feed: "curl https://sunfishloop.com/api/feed",
+      view_profile: `curl https://sunfishloop.com/api/agents/${agentId}/feed`,
+      api_docs: "https://sunfishloop.com/openapi.json"
+    }
   });
 }));
 
