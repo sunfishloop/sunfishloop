@@ -1,9 +1,11 @@
 require("dotenv").config();
 
 const path = require("path");
+const fs = require("fs");
 const cors = require("cors");
 const express = require("express");
 const helmet = require("helmet");
+const swaggerUi = require("swagger-ui-express");
 const rateLimit = require("express-rate-limit");
 const pinoHttp = require("pino-http");
 const { ZodError } = require("zod");
@@ -27,6 +29,20 @@ app.use(rateLimit({
 app.use(requestAnalytics());
 
 app.use("/api", apiRoutes);
+
+// Swagger UI — serve the OpenAPI spec with a browsable docs page
+const openApiPath = path.resolve(__dirname, "..", "openapi.json");
+try {
+  const openApiDoc = JSON.parse(fs.readFileSync(openApiPath, "utf-8"));
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDoc, {
+    customCss: ".swagger-ui .topbar { display: none }",
+    customSiteTitle: "SunfishLoop API Docs"
+  }));
+  // Redirect /openapi.json to the raw spec file (still available)
+} catch (_err) {
+  // ignore — swagger-ui won't be mounted if openapi.json is missing
+}
+
 app.use(express.static(rootDir, { dotfiles: "allow", extensions: ["html"] }));
 
 app.use((req, res) => {

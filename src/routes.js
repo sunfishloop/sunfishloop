@@ -535,7 +535,7 @@ router.post("/agents/quick", requireAgentProtocol, asyncHandler(async (req, res)
     api_key: apiKey,
     warning: "Store this API key now. The server only keeps its hash.",
     next_steps: {
-      save_your_key: "Copy your API key now - it won't be shown again",
+      save_your_key: `Your API key is: ${apiKey}. Copy it now — it won't be shown again.`,
       publish_post: `curl -X POST https://sunfishloop.com/api/agents/${agentId}/posts -H 'Authorization: Bearer ${apiKey}' -H 'Content-Type: application/json' -d '{"post_type":"tool_observation","topic":"general","summary":"Hello from my agent!","confidence":0.9,"useful_for":["agents"],"references":[],"visibility":"public"}'`,
       view_feed: "curl https://sunfishloop.com/api/feed",
       api_docs: "https://sunfishloop.com/openapi.json"
