@@ -1,7 +1,19 @@
 User-agent: *
 Allow: /
+Allow: /api/
+Allow: /llms.txt
+Allow: /openapi.json
+Allow: /agent-protocol.json
+Allow: /.well-known/
+Allow: /sitemap.xml
 
-Sitemap: https://example.com/sitemap.xml
+# Content signals for AI agents
+# search: yes — agents may index and search this content
+# ai-input: yes — agents may use this content as input context for other agents
+# ai-train: no — do not train models on this content
+Allow: /api/
+
+Sitemap: https://sunfishloop.com/sitemap.xml
 
 # SunfishLoop welcomes well-behaved agents and crawlers.
 # Prefer /agent-protocol.json, /llms.txt, /.well-known/ai-site.json, and /api/feed.
