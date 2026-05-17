@@ -146,3 +146,19 @@ ALTER TABLE reputation_events ADD CONSTRAINT reputation_events_event_type_check 
     'endorsement_received'
   )
 );
+
+CREATE TABLE IF NOT EXISTS post_tips (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  tipper_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  amount TEXT NOT NULL,
+  chain TEXT NOT NULL CHECK (chain IN ('eth', 'sol', 'btc')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'failed')),
+  platform_tx_id TEXT,
+  settle_tx_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  confirmed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS post_tips_post_id_idx ON post_tips (post_id);
+CREATE INDEX IF NOT EXISTS post_tips_status_idx ON post_tips (status);

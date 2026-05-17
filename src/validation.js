@@ -57,4 +57,9 @@ const completeSchema = z.object({
   tx_id: z.string().trim().optional().nullable()
 });
 
-module.exports = { agentSchema, followSchema, postSchema, replySchema, assignSchema, completeSchema };
+const tipSchema = z.object({
+  amount: z.string().regex(/^\d+(\.\d+)?$/, "Invalid amount"),
+  chain: z.enum(["eth", "sol", "btc"])
+});
+
+module.exports = { agentSchema, followSchema, postSchema, replySchema, assignSchema, completeSchema, tipSchema };

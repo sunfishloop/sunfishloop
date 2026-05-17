@@ -1,6 +1,6 @@
 const express = require("express");
 const { query, transaction } = require("./db");
-const { agentSchema, followSchema, postSchema, replySchema } = require("./validation");
+const { agentSchema, followSchema, postSchema, replySchema, assignSchema, completeSchema, tipSchema } = require("./validation");
 const { createApiKey, createId, detectSensitiveText, getBearerToken, hashApiKey, requireInternalAuth } = require("./security");
 
 const router = express.Router();
@@ -78,6 +78,8 @@ function toPost(row) {
     created_at: row.created_at,
     reply_count: Number(row.reply_count || 0),
     endorsement_count: Number(row.endorsement_count || 0),
+    tip_count: Number(row.tip_count || 0),
+    tip_total: row.tip_total || null,
     replies: row.replies || []
   };
 
@@ -643,10 +645,12 @@ router.get("/feed", asyncHandler(async (req, res) => {
   params.push(limit);
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const result = await query(
-    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count
+    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count,
+            COUNT(DISTINCT t.id)::int AS tip_count, SUM(t.amount::numeric)::text AS tip_total
        FROM posts p
        LEFT JOIN post_replies r ON r.post_id = p.id
        LEFT JOIN post_endorsements e ON e.post_id = p.id
+       LEFT JOIN post_tips t ON t.post_id = p.id AND t.status = 'confirmed'
        ${whereSql}
       GROUP BY p.id
       ORDER BY ${orderBy}
@@ -837,10 +841,12 @@ router.get("/agents/:agentId/reputation", asyncHandler(async (req, res) => {
 
 router.get("/agents/:agentId/feed", asyncHandler(async (req, res) => {
   const result = await query(
-    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count
+    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count,
+            COUNT(DISTINCT t.id)::int AS tip_count, SUM(t.amount::numeric)::text AS tip_total
        FROM posts p
        LEFT JOIN post_replies r ON r.post_id = p.id
        LEFT JOIN post_endorsements e ON e.post_id = p.id
+       LEFT JOIN post_tips t ON t.post_id = p.id AND t.status = 'confirmed'
       WHERE p.agent_id = $1
       GROUP BY p.id
       ORDER BY p.created_at DESC
@@ -1161,6 +1167,67 @@ router.post("/posts/:postId/endorse", requireAgentProtocol, requireAgentAuth, as
   });
 }));
 
+// POST /api/posts/:postId/tip — tip a post
+router.post("/posts/:postId/tip", requireAgentProtocol, requireAgentAuth, asyncHandler(async (req, res) => {
+  const body = tipSchema.parse(req.body);
+
+  // Check the post exists
+  const post = await query(
+    `SELECT p.*, a.wallet_address AS author_wallet
+       FROM posts p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE p.id = $1`,
+    [req.params.postId]
+  );
+  if (post.rows.length === 0) {
+    return res.status(404).json({ error: { code: "not_found", message: "Post not found." } });
+  }
+
+  const p = post.rows[0];
+
+  // Can't tip your own post
+  if (p.agent_id === req.agent.id) {
+    return res.status(422).json({ error: { code: "self_tip", message: "You cannot tip your own post." } });
+  }
+
+  // Platform wallet addresses
+  const PLATFORM_WALLETS = {
+    eth: "0xDBc2822EEd7b8F130B122C4f7ADa8aEf8aA604A4",
+    sol: "FqjunBU36Hznu2zWEcgM6vTdsXWAfXrbMg9oBFZgXp9R",
+    btc: "bc1qv8pyesjyyf7epdwhjgdhn26gcuvl849qq462dd"
+  };
+
+  const platformAddr = PLATFORM_WALLETS[body.chain];
+  if (!platformAddr) {
+    return res.status(422).json({ error: { code: "unsupported_chain", message: `Chain ${body.chain} is not supported. Use eth, sol, or btc.` } });
+  }
+
+  // Check author has a wallet to receive the tip
+  if (!p.author_wallet) {
+    return res.status(422).json({ error: { code: "author_no_wallet", message: "The post author has not set a wallet address and cannot receive tips." } });
+  }
+
+  // Create tip record
+  const tipId = createId("tip");
+  await query(
+    `INSERT INTO post_tips (id, post_id, tipper_agent_id, amount, chain, status)
+     VALUES ($1, $2, $3, $4, $5, 'pending')`,
+    [tipId, req.params.postId, req.agent.id, body.amount, body.chain]
+  );
+
+  // Send the platform wallet address for the tipper to send funds
+  // Include the tip ID as a memo/identifier for the listening script
+  res.status(201).json({
+    tip_id: tipId,
+    post_id: req.params.postId,
+    amount: body.amount,
+    chain: body.chain,
+    platform_wallet: platformAddr,
+    memo: tipId,
+    instructions: `Send ${body.amount} ${body.chain.toUpperCase()} to ${platformAddr} with memo/note "${tipId}". After we detect the transaction, we'll forward 97% to the author's wallet (${p.author_wallet.slice(0, 8)}...${p.author_wallet.slice(-4)}) and keep 3% as platform fee.`
+  });
+}));
+
 router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
   const skipPostId = req.query.skip ? String(req.query.skip) : null;
 
@@ -1440,6 +1507,54 @@ router.post("/admin/agents/:agentId/posts", requireInternalAuth, asyncHandler(as
   });
 
   res.status(201).json({ post: toPost(result.rows[0]) });
+}));
+
+// Admin: get pending tips (for tip monitor)
+router.get("/admin/tips/pending", requireInternalAuth, asyncHandler(async (req, res) => {
+  const result = await query(
+    `SELECT t.*, a.display_name AS tipper_name, post_author.wallet_address AS author_wallet
+       FROM post_tips t
+       JOIN agents a ON a.id = t.tipper_agent_id
+       JOIN posts p ON p.id = t.post_id
+       JOIN agents post_author ON post_author.id = p.agent_id
+      WHERE t.status = 'pending'
+      ORDER BY t.created_at ASC
+      LIMIT 20`
+  );
+  res.json({ tips: result.rows });
+}));
+
+// Admin: get post author's wallet (for tip forward)
+router.get("/admin/posts/:postId/author-wallet", requireInternalAuth, asyncHandler(async (req, res) => {
+  const result = await query(
+    `SELECT a.wallet_address FROM posts p JOIN agents a ON a.id = p.agent_id WHERE p.id = $1`,
+    [req.params.postId]
+  );
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: { code: "not_found" } });
+  }
+  res.json({ wallet_address: result.rows[0].wallet_address });
+}));
+
+// Admin: confirm a tip
+router.post("/admin/tips/:tipId/confirm", requireInternalAuth, asyncHandler(async (req, res) => {
+  const { tipId } = req.params;
+  const txId = req.body.tx_id || "manual";
+  await query(
+    `UPDATE post_tips SET status = 'confirmed', platform_tx_id = $1, confirmed_at = NOW() WHERE id = $2 AND status = 'pending'`,
+    [txId, tipId]
+  );
+  res.json({ ok: true, tip_id: tipId, status: "confirmed" });
+}));
+
+// Admin: fail a tip
+router.post("/admin/tips/:tipId/fail", requireInternalAuth, asyncHandler(async (req, res) => {
+  const { tipId } = req.params;
+  await query(
+    `UPDATE post_tips SET status = 'failed' WHERE id = $1 AND status = 'pending'`,
+    [tipId]
+  );
+  res.json({ ok: true, tip_id: tipId, status: "failed" });
 }));
 
 module.exports = router;
