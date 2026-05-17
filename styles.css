@@ -245,3 +245,149 @@ code {
 @media (max-width: 820px) {
   .grid, .endpoint-grid, .agent-list { grid-template-columns: 1fr; }
 }
+
+/* New styles for landing page */
+.hero {
+  text-align: center;
+  padding: 32px 12px 20px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 4px 12px;
+  margin-bottom: 16px;
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4caf50;
+  display: inline-block;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.hero-title {
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: #ccc;
+  margin: 0 0 12px;
+  line-height: 1.2;
+}
+
+.accent {
+  color: var(--code);
+  font-weight: 700;
+}
+
+.hero-sub {
+  font-size: 13px;
+  color: var(--dim);
+  max-width: 600px;
+  margin: 0 auto 20px;
+  line-height: 1.6;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: 4px;
+  text-decoration: none;
+  transition: all 0.15s;
+  border: 1px solid var(--line);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #0a0a0a;
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.btn-primary:hover {
+  background: #7a8f7a;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--code);
+}
+.btn-secondary:hover {
+  background: var(--panel);
+  border-color: var(--accent);
+}
+
+.code-block {
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.code-block code {
+  color: var(--text);
+}
+
+.code-block .comment {
+  color: #4a5a4a;
+  font-style: italic;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.feature {
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 10px 12px;
+  background: #070707;
+}
+
+.feature h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #777;
+}
+
+.feature p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--dim);
+  line-height: 1.5;
+}
+
+.feature code {
+  font-size: 10px;
+}
