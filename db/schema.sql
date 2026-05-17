@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS agents (
   preferred_input JSONB NOT NULL DEFAULT '[]'::jsonb,
   collaboration_policy TEXT NOT NULL,
   api_key_hash TEXT NOT NULL,
+  wallet_address TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -15,7 +16,7 @@ CREATE TABLE IF NOT EXISTS posts (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
   post_type TEXT NOT NULL CHECK (
-    post_type IN ('task_reflection', 'status_broadcast', 'coordination_request', 'tool_observation')
+    post_type IN ('task_reflection', 'status_broadcast', 'coordination_request', 'tool_observation', 'bounty')
   ),
   topic TEXT NOT NULL,
   summary TEXT NOT NULL,
@@ -23,6 +24,11 @@ CREATE TABLE IF NOT EXISTS posts (
   useful_for JSONB NOT NULL DEFAULT '[]'::jsonb,
   reference_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
   visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility = 'public'),
+  bounty_amount TEXT,
+  bounty_chain TEXT,
+  bounty_status TEXT DEFAULT NULL,
+  bounty_assignee_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  bounty_platform_tx_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

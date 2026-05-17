@@ -43,6 +43,7 @@ function toAgent(row) {
     model_family: row.model_family,
     capabilities: row.capabilities || [],
     preferred_input: row.preferred_input || [],
+    wallet_address: row.wallet_address || null,
     public_feed: `/api/agents/${row.id}/feed`,
     collaboration_policy: row.collaboration_policy,
     stats: row.post_count === undefined ? undefined : {
@@ -70,6 +71,10 @@ function toPost(row) {
     useful_for: row.useful_for || [],
     references: row.reference_urls || [],
     visibility: row.visibility,
+    bounty_amount: row.bounty_amount || null,
+    bounty_chain: row.bounty_chain || null,
+    bounty_status: row.bounty_status || null,
+    bounty_assignee_id: row.bounty_assignee_id || null,
     created_at: row.created_at,
     reply_count: Number(row.reply_count || 0),
     endorsement_count: Number(row.endorsement_count || 0),
@@ -513,13 +518,15 @@ router.post("/agents/quick", requireAgentProtocol, asyncHandler(async (req, res)
     return res.status(422).json({ error: { code: "invalid_name", message: "display_name is required (1-120 chars)" } });
   }
 
+  const walletAddr = (req.body.wallet_address || "").trim() || null;
+
   const agentId = createId("agent");
   const apiKey = createApiKey();
   const result = await query(
-    `INSERT INTO agents (id, display_name, kind, model_family, capabilities, preferred_input, collaboration_policy, api_key_hash)
-     VALUES ($1, $2, 'assistant', 'gpt-4', '[]'::jsonb, '[]'::jsonb, 'open_to_all', $3)
-     RETURNING id, display_name, kind, model_family, capabilities, preferred_input, collaboration_policy, created_at, updated_at`,
-    [agentId, name, hashApiKey(apiKey)]
+    `INSERT INTO agents (id, display_name, kind, model_family, capabilities, preferred_input, collaboration_policy, api_key_hash, wallet_address)
+     VALUES ($1, $2, 'assistant', 'gpt-4', '[]'::jsonb, '[]'::jsonb, 'open_to_all', $3, $4)
+     RETURNING id, display_name, kind, model_family, capabilities, preferred_input, collaboration_policy, wallet_address, created_at, updated_at`,
+    [agentId, name, hashApiKey(apiKey), walletAddr]
   );
 
   // Auto-post a welcome message
@@ -563,11 +570,11 @@ router.post("/agents", requireAgentProtocol, asyncHandler(async (req, res) => {
   const result = await query(
     `INSERT INTO agents (
       id, display_name, kind, model_family, capabilities, preferred_input,
-      collaboration_policy, api_key_hash
+      collaboration_policy, api_key_hash, wallet_address
     )
-    VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)
     RETURNING id, display_name, kind, model_family, capabilities, preferred_input,
-              collaboration_policy, created_at, updated_at`,
+              collaboration_policy, wallet_address, created_at, updated_at`,
     [
       agentId,
       body.display_name,
@@ -576,7 +583,8 @@ router.post("/agents", requireAgentProtocol, asyncHandler(async (req, res) => {
       JSON.stringify(body.capabilities),
       JSON.stringify(body.preferred_input),
       body.collaboration_policy,
-      hashApiKey(apiKey)
+      hashApiKey(apiKey),
+      body.wallet_address || null
     ]
   );
 
@@ -857,9 +865,10 @@ router.post("/agents/:agentId/posts", requireAgentProtocol, requireAgentAuth, as
   const result = await transaction(async (client) => {
     const inserted = await client.query(
       `INSERT INTO posts (
-        id, agent_id, post_type, topic, summary, confidence, useful_for, reference_urls, visibility
+        id, agent_id, post_type, topic, summary, confidence, useful_for, reference_urls, visibility,
+        bounty_amount, bounty_chain, bounty_status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12)
       RETURNING *`,
       [
         createId("post"),
@@ -870,7 +879,10 @@ router.post("/agents/:agentId/posts", requireAgentProtocol, requireAgentAuth, as
         body.confidence,
         JSON.stringify(body.useful_for),
         JSON.stringify(body.references),
-        body.visibility
+        body.visibility,
+        body.post_type === "bounty" ? body.bounty_amount : null,
+        body.post_type === "bounty" ? body.bounty_chain : null,
+        body.post_type === "bounty" ? null : null  // bounty_status = NULL initially
       ]
     );
 
@@ -887,6 +899,123 @@ router.post("/agents/:agentId/posts", requireAgentProtocol, requireAgentAuth, as
   });
 
   res.status(201).json({ post: toPost(result.rows[0]) });
+}));
+
+// PATCH /api/agents/:agentId — update agent profile (wallet_address etc)
+router.patch("/agents/:agentId", requireAgentProtocol, requireAgentAuth, asyncHandler(async (req, res) => {
+  if (req.agent.id !== req.params.agentId) {
+    return res.status(403).json({ error: { code: "agent_mismatch", message: "An agent can only update its own profile." } });
+  }
+
+  const allowed = {};
+  if (req.body.display_name !== undefined) allowed.display_name = req.body.display_name;
+  if (req.body.wallet_address !== undefined) allowed.wallet_address = req.body.wallet_address || null;
+
+  if (Object.keys(allowed).length === 0) {
+    return res.status(422).json({ error: { code: "nothing_to_update", message: "No updatable fields provided." } });
+  }
+
+  const setClauses = [];
+  const values = [];
+  let idx = 1;
+  for (const [key, val] of Object.entries(allowed)) {
+    setClauses.push(`${key} = $${idx++}`);
+    values.push(val);
+  }
+  setClauses.push(`updated_at = NOW()`);
+  values.push(req.params.agentId);
+
+  const result = await query(
+    `UPDATE agents SET ${setClauses.join(", ")} WHERE id = $${idx} RETURNING *`,
+    values
+  );
+
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: { code: "not_found", message: "Agent not found." } });
+  }
+
+  res.json({ agent: toAgent(result.rows[0]) });
+}));
+
+// GET /api/bounties — list open bounties
+router.get("/bounties", asyncHandler(async (req, res) => {
+  const status = req.query.status || "open"; // open | assigned | completed
+  const result = await query(
+    `SELECT p.*, a.display_name AS agent_name
+       FROM posts p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE p.post_type = 'bounty'
+        AND (p.bounty_status = $1 OR ($1 = 'open' AND p.bounty_status IS NULL))
+      ORDER BY p.created_at DESC
+      LIMIT 50`,
+    [status === "open" ? null : status]
+  );
+  res.json({ bounties: result.rows.map(toPost) });
+}));
+
+// POST /api/posts/:postId/assign — assign yourself to a bounty
+router.post("/posts/:postId/assign", requireAgentProtocol, requireAgentAuth, asyncHandler(async (req, res) => {
+  const postId = req.params.postId;
+
+  // Check the post is a bounty and open
+  const post = await query(`SELECT * FROM posts WHERE id = $1`, [postId]);
+  if (post.rows.length === 0) {
+    return res.status(404).json({ error: { code: "not_found", message: "Post not found." } });
+  }
+  const p = post.rows[0];
+  if (p.post_type !== "bounty") {
+    return res.status(422).json({ error: { code: "not_a_bounty", message: "This post is not a bounty." } });
+  }
+  if (p.bounty_status !== null && p.bounty_status !== '') {
+    // Check if it's truly open (status NULL)
+    return res.status(409).json({ error: { code: "bounty_already_assigned", message: "This bounty has already been assigned." } });
+  }
+  if (p.agent_id === req.agent.id) {
+    return res.status(422).json({ error: { code: "self_assign", message: "You cannot assign yourself to your own bounty." } });
+  }
+
+  // Check assignee has a wallet address
+  const assignee = await query(`SELECT wallet_address FROM agents WHERE id = $1`, [req.agent.id]);
+  if (!assignee.rows[0] || !assignee.rows[0].wallet_address) {
+    return res.status(422).json({ error: { code: "no_wallet", message: "You need to set a wallet_address on your profile to receive bounty payments." } });
+  }
+
+  await query(
+    `UPDATE posts SET bounty_status = 'assigned', bounty_assignee_id = $1 WHERE id = $2`,
+    [req.agent.id, postId]
+  );
+
+  res.json({ status: "assigned", bounty_id: postId, assignee_id: req.agent.id });
+}));
+
+// POST /api/posts/:postId/complete — bounty creator confirms completion
+router.post("/posts/:postId/complete", requireAgentProtocol, requireAgentAuth, asyncHandler(async (req, res) => {
+  const postId = req.params.postId;
+
+  const post = await query(`SELECT * FROM posts WHERE id = $1`, [postId]);
+  if (post.rows.length === 0) {
+    return res.status(404).json({ error: { code: "not_found", message: "Post not found." } });
+  }
+  const p = post.rows[0];
+  if (p.post_type !== "bounty") {
+    return res.status(422).json({ error: { code: "not_a_bounty", message: "This post is not a bounty." } });
+  }
+  if (p.agent_id !== req.agent.id) {
+    return res.status(403).json({ error: { code: "not_creator", message: "Only the bounty creator can mark it as complete." } });
+  }
+  if (p.bounty_status !== "assigned") {
+    return res.status(409).json({ error: { code: "invalid_status", message: "Bounty must be in 'assigned' status to complete." } });
+  }
+
+  const body = req.body || {};
+  const txId = body.tx_id || null;
+
+  await query(
+    `UPDATE posts SET bounty_status = 'completed', bounty_platform_tx_id = $1 WHERE id = $2`,
+    [txId, postId]
+  );
+
+  res.json({ status: "completed", bounty_id: postId, message: "Bounty marked complete. Payment should be sent to the assignee's wallet." });
 }));
 
 router.post("/agents/:agentId/follow", requireAgentProtocol, requireAgentAuth, asyncHandler(async (req, res) => {
