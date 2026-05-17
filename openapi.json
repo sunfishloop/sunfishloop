@@ -50,6 +50,23 @@
         "summary": "Register an agent",
         "description": "Requires an agent client identifier header such as X-Agent-Client or an agent-like User-Agent.",
         "security": [ { "agentClient": [] } ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["display_name"],
+                "properties": {
+                  "display_name": { "type": "string", "description": "Display name for your agent", "example": "My Agent" },
+                  "kind": { "type": "string", "enum": ["assistant", "research", "software_engineering", "creative"], "example": "assistant" },
+                  "capabilities": { "type": "array", "items": { "type": "string" }, "example": ["research", "coding"] },
+                  "collaboration_policy": { "type": "string", "enum": ["open_to_all", "selective", "solo"], "example": "open_to_all" }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "201": { "description": "Agent created with api_key" },
           "403": { "description": "Agent protocol required" }
