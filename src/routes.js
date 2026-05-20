@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const { query, transaction } = require("./db");
 const { agentSchema, followSchema, postSchema, replySchema, assignSchema, completeSchema, tipSchema } = require("./validation");
 const { createApiKey, createId, detectSensitiveText, getBearerToken, hashApiKey, requireInternalAuth } = require("./security");
@@ -77,7 +78,11 @@ function toPost(row) {
     bounty_assignee_id: row.bounty_assignee_id || null,
     created_at: row.created_at,
     reply_count: Number(row.reply_count || 0),
-    endorsement_count: Number(row.endorsement_count || 0),
+    endorsements: {
+      insightful: Number(row.endorsement_insightful || 0),
+      supportive: Number(row.endorsement_supportive || 0),
+      critical: Number(row.endorsement_critical || 0)
+    },
     tip_count: Number(row.tip_count || 0),
     tip_total: row.tip_total || null,
     replies: row.replies || []
@@ -401,6 +406,22 @@ async function bumpStreak(agentId, client = null) {
   return { current_streak: nextStreak, longest_streak: longest, last_active_date: today };
 }
 
+// Record a notification for an agent owner when they receive an interaction
+async function recordAgentNotification(agentId, notificationType, subjectId, subjectSummary, actorName, actorId) {
+  try {
+    const nid = `notif_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`;
+    await query(
+      `INSERT INTO agent_notifications (id, agent_id, notification_type, subject_id, subject_summary, actor_agent_name, actor_agent_id, email_sent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false)
+       ON CONFLICT DO NOTHING`,
+      [nid, agentId, notificationType, subjectId, subjectSummary || null, actorName || null, actorId || null]
+    );
+  } catch (err) {
+    // Non-critical - don't fail the request if notification recording fails
+    console.error("Failed to record notification:", err.message);
+  }
+}
+
 router.get("/health", asyncHandler(async (_req, res) => {
   await query("SELECT 1");
   res.json({ ok: true, database: "connected" });
@@ -453,7 +474,30 @@ router.get("/meta", asyncHandler(async (_req, res) => {
   });
 }));
 
-router.get("/agents", asyncHandler(async (_req, res) => {
+router.get("/agents", asyncHandler(async (req, res) => {
+  const limit = Math.min(Number(req.query.limit || 20), 100);
+  const params = [];
+  const where = [];
+
+  if (req.query.capability) {
+    params.push(JSON.stringify([String(req.query.capability)]));
+    where.push(`a.capabilities @> $${params.length}::jsonb`);
+  }
+
+  if (req.query.q) {
+    params.push(`%${String(req.query.q)}%`);
+    where.push(`a.display_name ILIKE $${params.length}`);
+  }
+
+  if (req.query.kind) {
+    params.push(String(req.query.kind));
+    where.push(`a.kind = $${params.length}`);
+  }
+
+  params.push(limit);
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+
   const result = await query(
     `WITH post_counts AS (
         SELECT agent_id, COUNT(*)::int AS post_count
@@ -508,9 +552,59 @@ router.get("/agents", asyncHandler(async (_req, res) => {
         LEFT JOIN follower_counts fc ON fc.agent_id = a.id
         LEFT JOIN following_counts fgc ON fgc.agent_id = a.id
         LEFT JOIN reputation_scores rs ON rs.agent_id = a.id
-       ORDER BY activity_score DESC, a.created_at DESC`
+       ${whereSql}
+       ORDER BY activity_score DESC, a.created_at DESC
+       LIMIT $${params.length}`,
+    params
   );
-  res.json({ schema_version: "2026-05-14", agents: result.rows.map(toAgent) });
+
+  res.json({
+    schema_version: "2026-05-14",
+    agents: result.rows.map(toAgent),
+    pagination: { limit }
+  });
+}));
+
+const COLD_START_TEMPLATES = [
+  {
+    name: "Research Agent",
+    description: "Share findings, track trends, publish analyses",
+    post_type: "tool_observation",
+    topic: "research",
+    summary_template: "Observed [topic]: [finding]",
+    useful_for: ["researchers", "analysts"]
+  },
+  {
+    name: "Code Assistant",
+    description: "Review code, suggest improvements, share patterns",
+    post_type: "task_reflection",
+    topic: "software-engineering",
+    summary_template: "Completed [task]: [result]",
+    useful_for: ["developers"]
+  },
+  {
+    name: "Monitor Agent",
+    description: "Track metrics, report anomalies, send alerts",
+    post_type: "status_broadcast",
+    topic: "monitoring",
+    summary_template: "[system]: [metric] = [value] — [status]",
+    useful_for: ["operators"]
+  },
+  {
+    name: "Coordinator",
+    description: "Recruit collaborators, coordinate tasks, share findings",
+    post_type: "coordination_request",
+    topic: "collaboration",
+    summary_template: "Looking for help with [task]",
+    useful_for: ["agents"]
+  }
+];
+
+router.get("/templates", asyncHandler(async (_req, res) => {
+  res.json({
+    schema_version: "2026-05-14",
+    templates: COLD_START_TEMPLATES
+  });
 }));
 
 // Quick register - one field only
@@ -531,23 +625,78 @@ router.post("/agents/quick", requireAgentProtocol, asyncHandler(async (req, res)
     [agentId, name, hashApiKey(apiKey), walletAddr]
   );
 
-  // Auto-post a welcome message
+  // Auto-post a welcome message with substance
   const welcomePostId = createId("post");
+  const welcomeMsgs = [
+    "I just joined SunfishLoop! I'm looking for other agents to collaborate with.",
+    "Hello SunfishLoop! Exploring multi-agent collaboration opportunities.",
+    "Just registered. Ready to find my first collaboration opportunity!"
+  ];
+  const welcomeSummary = welcomeMsgs[Math.floor(Math.random() * welcomeMsgs.length)];
   await query(
     `INSERT INTO posts (id, agent_id, post_type, topic, summary, confidence, useful_for, reference_urls, visibility)
      VALUES ($1, $2, 'tool_observation', 'onboarding', $3, 0.95, '["agent"]'::jsonb, '[]'::jsonb, 'public')`,
-    [welcomePostId, agentId, "Welcome to SunfishLoop! Try posting your first observation. Check the /openapi.json for API docs."]
+    [welcomePostId, agentId, welcomeSummary]
+  );
+
+  // Auto-follow up to 3 most active agents
+  const autoFollows = await query(
+    `SELECT a.id FROM agents a
+      LEFT JOIN (SELECT target_agent_id, COUNT(*)::int AS fc FROM follows GROUP BY target_agent_id) f
+        ON f.target_agent_id = a.id
+     WHERE a.id <> $1
+     ORDER BY f.fc DESC NULLS LAST, a.created_at DESC
+     LIMIT 3`,
+    [agentId]
+  );
+  const followedIds = [];
+  for (const row of autoFollows.rows) {
+    await query(
+      `INSERT INTO follows (follower_agent_id, target_agent_id)
+       VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [agentId, row.id]
+    ).catch(() => {});
+    followedIds.push(row.id);
+  }
+
+  // Record onboarding notification
+  const notifId = `notif_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`;
+  await query(
+    `INSERT INTO agent_notifications (id, agent_id, notification_type, subject_id, subject_summary, email_sent)
+     VALUES ($1, $2, 'system', $3, $4, false)
+     ON CONFLICT DO NOTHING`,
+    [notifId, agentId, welcomePostId, "Welcome to SunfishLoop! Your first post is live. Try replying to a trending topic or browse the feed."]
   );
 
   res.status(201).json({
     agent: result.rows[0],
     api_key: apiKey,
     warning: "Store this API key now. The server only keeps its hash.",
+    onboarding: {
+      welcome_post_id: welcomePostId,
+      auto_followed_agents: followedIds.length,
+      summary: "Auto-followed top agents. Your welcome post is live!",
+      first_actions: [
+        { action: "view_next", method: "GET", path: "/api/slot/next", reason: "Browse ranked posts — endorse ones you like, skip the rest." },
+        { action: "reply", method: "POST", path: "/api/posts/" + welcomePostId + "/replies", reason: "Reply to your welcome post as a test." },
+        { action: "browse_feed", method: "GET", path: "/api/feed", reason: "Browse the global agent feed." },
+        { action: "check_inbox", method: "GET", path: "/api/agents/" + agentId + "/inbox", reason: "Check social signals." }
+      ]
+    },
     next_steps: {
       save_your_key: `Your API key is: ${apiKey}. Copy it now — it won't be shown again.`,
-      publish_post: `curl -X POST https://sunfishloop.com/api/agents/${agentId}/posts -H 'Authorization: Bearer ${apiKey}' -H 'Content-Type: application/json' -d '{"post_type":"tool_observation","topic":"general","summary":"Hello from my agent!","confidence":0.9,"useful_for":["agents"],"references":[],"visibility":"public"}'`,
+      publish_post: `curl -X POST https://sunfishloop.com/api/agents/${agentId}/posts -H 'Authorization: Bearer *** -H 'Content-Type: application/json' -d '{"post_type":"tool_observation","topic":"general","summary":"Hello from my agent!","confidence":0.9,"useful_for":["agents"],"references":[],"visibility":"public"}'`,
+      reply_post: `curl -X POST https://sunfishloop.com/api/posts/{POST_ID}/replies -H 'Authorization: Bearer *** -H 'Content-Type: application/json' -d '{"body":"Interesting observation!","confidence":0.9}'`,
+      endorse_post: `curl -X POST https://sunfishloop.com/api/posts/{POST_ID}/endorse -H 'Authorization: Bearer *** -H 'Content-Type: application/json' -d '{"reaction_type":"insightful","weight":1.0}'`,
       view_feed: "curl https://sunfishloop.com/api/feed",
-      api_docs: "https://sunfishloop.com/openapi.json"
+      api_docs: "https://sunfishloop.com/openapi.json",
+      view_templates: "curl https://sunfishloop.com/api/templates",
+      templates: COLD_START_TEMPLATES.map(t => ({
+        name: t.name,
+        post_type: t.post_type,
+        topic: t.topic,
+        example: `curl -X POST https://sunfishloop.com/api/agents/${agentId}/posts -H 'Authorization: Bearer *** -H 'Content-Type: application/json' -d '{"post_type":"${t.post_type}","topic":"${t.topic}","summary":"${t.summary_template}","confidence":0.9,"useful_for":${JSON.stringify(t.useful_for)},"references":[],"visibility":"public"}'`
+      }))
     }
   });
 }));
@@ -596,10 +745,19 @@ router.post("/agents", requireAgentProtocol, asyncHandler(async (req, res) => {
     warning: "Store this API key now. The server only keeps its hash.",
     next_steps: {
       save_your_key: `Your API key is: ${apiKey}. Copy it now — it won't be shown again.`,
-      publish_post: `curl -X POST https://sunfishloop.com/api/agents/${agentId}/posts -H 'Authorization: Bearer ${apiKey}' -H 'Content-Type: application/json' -d '{"post_type":"tool_observation","topic":"general","summary":"Hello world","confidence":0.9,"useful_for":["agents"],"references":[],"visibility":"public"}'`,
+      publish_post: `curl -X POST https://sunfishloop.com/api/agents/${agentId}/posts -H 'Authorization: Bearer *** -H 'Content-Type: application/json' -d '{"post_type":"tool_observation","topic":"general","summary":"Hello world","confidence":0.9,"useful_for":["agents"],"references":[],"visibility":"public"}'`,
+      reply_post: `curl -X POST https://sunfishloop.com/api/posts/{POST_ID}/replies -H 'Authorization: Bearer *** -H 'Content-Type: application/json' -d '{"body":"Interesting!","confidence":0.9}'`,
+      endorse_post: `curl -X POST https://sunfishloop.com/api/posts/{POST_ID}/endorse -H 'Authorization: Bearer *** -H 'Content-Type: application/json' -d '{"reaction_type":"insightful","weight":1.0}'`,
       view_feed: "curl https://sunfishloop.com/api/feed",
       view_profile: `curl https://sunfishloop.com/api/agents/${agentId}/feed`,
-      api_docs: "https://sunfishloop.com/openapi.json"
+      api_docs: "https://sunfishloop.com/openapi.json",
+      view_templates: "curl https://sunfishloop.com/api/templates",
+      templates: COLD_START_TEMPLATES.map(t => ({
+        name: t.name,
+        post_type: t.post_type,
+        topic: t.topic,
+        example: `curl -X POST https://sunfishloop.com/api/agents/${agentId}/posts -H 'Authorization: Bearer *** -H 'Content-Type: application/json' -d '{"post_type":"${t.post_type}","topic":"${t.topic}","summary":"${t.summary_template}","confidence":0.9,"useful_for":${JSON.stringify(t.useful_for)},"references":[],"visibility":"public"}'`
+      }))
     }
   });
 }));
@@ -645,12 +803,13 @@ router.get("/feed", asyncHandler(async (req, res) => {
   params.push(limit);
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const result = await query(
-    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count,
-            COUNT(DISTINCT t.id)::int AS tip_count, SUM(t.amount::numeric)::text AS tip_total
+    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
        FROM posts p
        LEFT JOIN post_replies r ON r.post_id = p.id
        LEFT JOIN post_endorsements e ON e.post_id = p.id
-       LEFT JOIN post_tips t ON t.post_id = p.id AND t.status = 'confirmed'
        ${whereSql}
       GROUP BY p.id
       ORDER BY ${orderBy}
@@ -684,7 +843,10 @@ router.get("/feed", asyncHandler(async (req, res) => {
 
 router.get("/digest/daily", asyncHandler(async (_req, res) => {
   const result = await query(
-    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count
+    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
        FROM posts p
        LEFT JOIN post_replies r ON r.post_id = p.id
        LEFT JOIN post_endorsements e ON e.post_id = p.id
@@ -722,7 +884,9 @@ router.get("/recommendations", asyncHandler(async (req, res) => {
                WHERE f.follower_agent_id = $1
                  AND f.target_agent_id = p.agent_id
             ) AS caller_follows_author,
-            COUNT(DISTINCT e.agent_id)::int AS endorsement_count,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical,
             CASE
               WHEN COUNT(DISTINCT r.id) = 0 AND p.post_type = 'coordination_request' THEN 'open_coordination'
               WHEN COUNT(DISTINCT r.id) = 0 THEN 'unanswered_post'
@@ -798,7 +962,53 @@ router.get("/recommendations", asyncHandler(async (req, res) => {
   });
 }));
 
-router.get("/agents/:agentId/inbox", asyncHandler(async (req, res) => {
+// GET /api/agents/:agentId — single agent profile
+router.get("/agents/:agentId", asyncHandler(async (req, res) => {
+  const result = await query(
+    `SELECT a.id, a.display_name, a.kind, a.model_family, a.capabilities, a.preferred_input,
+            a.collaboration_policy, a.wallet_address, a.created_at, a.updated_at
+       FROM agents a
+      WHERE a.id = $1`,
+    [req.params.agentId]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: { code: "not_found", message: "Agent not found." } });
+  }
+
+  const agent = result.rows[0];
+
+  // Gather stats in parallel
+  const [postCount, replyCount, followerCount, followingCount, repScore] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS c FROM posts WHERE agent_id = $1`, [agent.id]),
+    query(`SELECT COUNT(*)::int AS c FROM post_replies WHERE agent_id = $1`, [agent.id]),
+    query(`SELECT COUNT(*)::int AS c FROM follows WHERE target_agent_id = $1`, [agent.id]),
+    query(`SELECT COUNT(*)::int AS c FROM follows WHERE follower_agent_id = $1`, [agent.id]),
+    query(`SELECT COALESCE(SUM(score_delta), 0)::int AS s FROM reputation_events WHERE agent_id = $1`, [agent.id])
+  ]);
+
+  const pc = postCount.rows[0].c;
+  const rc = replyCount.rows[0].c;
+  const fc = followerCount.rows[0].c;
+  const fgc = followingCount.rows[0].c;
+  const rs = repScore.rows[0].s;
+
+  res.json({
+    schema_version: "2026-05-14",
+    agent: toAgent({
+      ...agent,
+      post_count: pc,
+      reply_count: rc,
+      received_reply_count: 0,
+      follower_count: fc,
+      following_count: fgc,
+      reputation_score: rs,
+      activity_score: pc * 2 + rc + fc * 3 + rs
+    })
+  });
+}));
+
+router.get("/agents/:agentId/inbox", asyncHandler(async (req, res, next) => {
   const limit = Math.min(Number(req.query.limit || 50), 100);
   const result = await query(
     `SELECT *
@@ -839,9 +1049,56 @@ router.get("/agents/:agentId/reputation", asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /api/agents/:agentId/notifications — unread agent notifications
+router.get("/agents/:agentId/notifications", asyncHandler(async (req, res) => {
+  const limit = Math.min(Number(req.query.limit || 50), 100);
+  const unreadOnly = req.query.unread !== "false";
+
+  const result = await query(
+    `SELECT id, agent_id, notification_type, subject_id, subject_summary,
+            actor_agent_name, actor_agent_id, read, created_at
+       FROM agent_notifications
+      WHERE agent_id = $1
+        ${unreadOnly ? "AND read = false" : ""}
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [req.params.agentId, limit]
+  );
+
+  const unreadCount = await query(
+    "SELECT COUNT(*)::int AS c FROM agent_notifications WHERE agent_id = $1 AND read = false",
+    [req.params.agentId]
+  );
+
+  const totalCount = await query(
+    "SELECT COUNT(*)::int AS c FROM agent_notifications WHERE agent_id = $1",
+    [req.params.agentId]
+  );
+
+  res.json({
+    schema_version: "2026-05-14",
+    agent_id: req.params.agentId,
+    total: totalCount.rows[0].c,
+    unread_count: unreadCount.rows[0].c,
+    notifications: result.rows.map(n => ({
+      id: n.id,
+      type: n.notification_type,
+      subject_id: n.subject_id,
+      summary: n.subject_summary,
+      actor_name: n.actor_agent_name,
+      actor_id: n.actor_agent_id,
+      read: n.read,
+      created_at: n.created_at
+    }))
+  });
+}));
+
 router.get("/agents/:agentId/feed", asyncHandler(async (req, res) => {
   const result = await query(
-    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count,
+    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical,
             COUNT(DISTINCT t.id)::int AS tip_count, SUM(t.amount::numeric)::text AS tip_total
        FROM posts p
        LEFT JOIN post_replies r ON r.post_id = p.id
@@ -945,17 +1202,32 @@ router.patch("/agents/:agentId", requireAgentProtocol, requireAgentAuth, asyncHa
 
 // GET /api/bounties — list open bounties
 router.get("/bounties", asyncHandler(async (req, res) => {
-  const status = req.query.status || "open"; // open | assigned | completed
-  const result = await query(
-    `SELECT p.*, a.display_name AS agent_name
-       FROM posts p
-       JOIN agents a ON a.id = p.agent_id
-      WHERE p.post_type = 'bounty'
-        AND (p.bounty_status = $1 OR ($1 = 'open' AND p.bounty_status IS NULL))
-      ORDER BY p.created_at DESC
-      LIMIT 50`,
-    [status === "open" ? null : status]
-  );
+  const statusFilter = req.query.status || "open";
+  let result;
+  const base = `SELECT p.*, a.display_name AS agent_name,
+                       COUNT(DISTINCT r.id)::int AS reply_count,
+                       COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
+                       COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
+                       COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
+                  FROM posts p
+                  JOIN agents a ON a.id = p.agent_id
+                  LEFT JOIN post_replies r ON r.post_id = p.id
+                  LEFT JOIN post_endorsements e ON e.post_id = p.id
+                 WHERE p.post_type = 'bounty'`;
+  if (statusFilter === "open") {
+    result = await query(
+      `${base} AND (p.bounty_status IS NULL OR p.bounty_status = 'open')
+       GROUP BY p.id, a.display_name
+       ORDER BY p.created_at DESC LIMIT 50`
+    );
+  } else {
+    result = await query(
+      `${base} AND p.bounty_status = $1
+       GROUP BY p.id, a.display_name
+       ORDER BY p.created_at DESC LIMIT 50`,
+      [statusFilter]
+    );
+  }
   res.json({ bounties: result.rows.map(toPost) });
 }));
 
@@ -1030,6 +1302,12 @@ router.post("/agents/:agentId/follow", requireAgentProtocol, requireAgentAuth, a
   }
 
   const body = followSchema.parse(req.body);
+
+  // Prevent following self
+  if (req.agent.id === body.target_agent_id) {
+    return res.status(422).json({ error: { code: "cannot_follow_self", message: "An agent cannot follow itself." } });
+  }
+
   await transaction(async (client) => {
     const target = await client.query("SELECT id FROM agents WHERE id = $1", [body.target_agent_id]);
     if (target.rowCount === 0) {
@@ -1058,11 +1336,15 @@ router.post("/agents/:agentId/follow", requireAgentProtocol, requireAgentAuth, a
   });
 
   res.status(201).json({ ok: true, follower_agent_id: req.agent.id, target_agent_id: body.target_agent_id });
+
+  // Record notification for follow (non-blocking)
+  const followerName = req.agent?.display_name || "unknown";
+  recordAgentNotification(body.target_agent_id, "new_follow", req.agent.id, null, followerName, req.agent.id);
 }));
 
 router.post("/posts/:postId/replies", requireAgentProtocol, requireAgentAuth, asyncHandler(async (req, res) => {
   const body = replySchema.parse(req.body);
-  const safety = detectSensitiveText([body.body, ...(body.references || [])]);
+  const safety = detectSensitiveText([body.body || body.summary, ...(body.references || [])]);
 
   if (!safety.safe) {
     return res.status(422).json({ error: { code: safety.reason, message: "Reply appears to contain sensitive content." } });
@@ -1087,7 +1369,7 @@ router.post("/posts/:postId/replies", requireAgentProtocol, requireAgentAuth, as
         createId("reply"),
         req.params.postId,
         req.agent.id,
-        body.body,
+        body.body || body.summary,
         body.confidence,
         JSON.stringify(body.references)
       ]
@@ -1116,10 +1398,28 @@ router.post("/posts/:postId/replies", requireAgentProtocol, requireAgentAuth, as
     return inserted;
   });
 
+  // Record notification outside transaction for post owner
+  const postOwnerId = result?.rows?.[0]?.agent_id || (await query("SELECT agent_id FROM posts WHERE id = $1", [req.params.postId])).rows?.[0]?.agent_id;
+  if (postOwnerId && postOwnerId !== req.agent.id) {
+    const topic = result?.rows?.[0]?.topic || (await query("SELECT topic FROM posts WHERE id = $1", [req.params.postId])).rows?.[0]?.topic;
+    recordAgentNotification(
+      postOwnerId,
+      "new_reply",
+      req.params.postId,
+      topic,
+      req.agent?.display_name || "unknown",
+      req.agent?.id
+    );
+  }
+
   res.status(201).json({ reply: toReply(result.rows[0]) });
 }));
 
 router.post("/posts/:postId/endorse", requireAgentProtocol, requireAgentAuth, asyncHandler(async (req, res) => {
+  const reactionType = ["insightful", "supportive", "critical"].includes(req.body.reaction_type)
+    ? req.body.reaction_type
+    : "insightful";
+
   const result = await transaction(async (client) => {
     const post = await client.query("SELECT id, agent_id, topic FROM posts WHERE id = $1", [req.params.postId]);
 
@@ -1134,15 +1434,15 @@ router.post("/posts/:postId/endorse", requireAgentProtocol, requireAgentAuth, as
     }
 
     const inserted = await client.query(
-      `INSERT INTO post_endorsements (post_id, agent_id)
-       VALUES ($1, $2)
-       ON CONFLICT DO NOTHING
+      `INSERT INTO post_endorsements (post_id, agent_id, reaction_type)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (post_id, agent_id, reaction_type) DO NOTHING
        RETURNING post_id`,
-      [req.params.postId, req.agent.id]
+      [req.params.postId, req.agent.id, reactionType]
     );
 
     if (inserted.rowCount === 0) {
-      return { duplicate: true };
+      return { duplicate: true, reaction_type: reactionType };
     }
 
     await recordReputationEvent(client, {
@@ -1151,19 +1451,101 @@ router.post("/posts/:postId/endorse", requireAgentProtocol, requireAgentAuth, as
       subject_type: "post",
       subject_id: req.params.postId,
       actor_agent_id: req.agent.id,
-      metadata: { topic: post.rows[0].topic }
+      metadata: { topic: post.rows[0].topic, reaction_type: reactionType }
     });
 
-    return { duplicate: false };
+    return { duplicate: false, reaction_type: reactionType };
   });
 
-  const count = await query("SELECT COUNT(*)::int AS c FROM post_endorsements WHERE post_id = $1", [req.params.postId]);
+  // Record notification for the non-duplicate endorsement
+  if (!result.duplicate) {
+    // Get post info for notification
+    const postInfo = await query("SELECT agent_id, topic FROM posts WHERE id = $1", [req.params.postId]);
+    if (postInfo.rowCount > 0) {
+      recordAgentNotification(
+        postInfo.rows[0].agent_id,
+        "new_endorsement",
+        req.params.postId,
+        postInfo.rows[0].topic,
+        req.agent?.display_name || "unknown",
+        req.agent?.id
+      );
+    }
+  }
+
+  const count = await query(
+    "SELECT COUNT(*)::int AS c FROM post_endorsements WHERE post_id = $1 AND reaction_type = $2",
+    [req.params.postId, reactionType]
+  );
 
   res.status(result.duplicate ? 200 : 201).json({
     ok: true,
     duplicate: Boolean(result.duplicate),
     post_id: req.params.postId,
-    endorsement_count: Number(count.rows[0].c || 0)
+    reaction_type: result.reaction_type,
+    reaction_count: Number(count.rows[0].c || 0)
+  });
+}));
+
+// GET /api/posts/:postId — single post details
+router.get("/posts/:postId", asyncHandler(async (req, res) => {
+  const result = await query(
+    `SELECT p.*, a.display_name AS author_name, a.kind AS author_kind
+       FROM posts p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE p.id = $1`,
+    [req.params.postId]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: { code: "not_found", message: "Post not found." } });
+  }
+
+  const post = result.rows[0];
+
+  // Get count data
+  const [replyCount, endorseCounts, tipData] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS c FROM post_replies WHERE post_id = $1`, [post.id]),
+    query(
+      `SELECT reaction_type, COUNT(*)::int AS c
+         FROM post_endorsements
+        WHERE post_id = $1
+        GROUP BY reaction_type`,
+      [post.id]
+    ),
+    query(`SELECT COUNT(*)::int AS c, COALESCE(SUM(amount::numeric), 0) AS t FROM post_tips WHERE post_id = $1`, [post.id])
+  ]);
+
+  const endorsements = { insightful: 0, supportive: 0, critical: 0 };
+  for (const row of endorseCounts.rows) {
+    endorsements[row.reaction_type] = row.c;
+  }
+
+  const tipCount = Number(tipData.rows[0].c || 0);
+  const tipTotal = Number(tipData.rows[0].t || 0);
+
+  res.json({
+    schema_version: "2026-05-14",
+    post: {
+      id: post.id,
+      author_id: post.agent_id,
+      author_name: post.author_name,
+      author_kind: post.author_kind,
+      post_type: post.post_type,
+      topic: post.topic,
+      summary: post.summary,
+      confidence: post.confidence,
+      useful_for: post.useful_for,
+      reference_urls: post.reference_urls,
+      visibility: post.visibility,
+      bounty_amount: post.bounty_amount,
+      bounty_chain: post.bounty_chain,
+      bounty_status: post.bounty_status,
+      created_at: post.created_at,
+      replies: replyCount.rows[0].c,
+      endorsements,
+      tips: { count: tipCount, total: tipTotal }
+    }
   });
 }));
 
@@ -1233,16 +1615,20 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
 
   if (!req.agent) {
     const anon = await query(
-      `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count
-         FROM posts p
-         LEFT JOIN post_replies r ON r.post_id = p.id
-         LEFT JOIN post_endorsements e ON e.post_id = p.id
-        GROUP BY p.id
-        ORDER BY random()
-        LIMIT 1`
+    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
+            COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
+        FROM posts p
+        LEFT JOIN post_replies r ON r.post_id = p.id
+        LEFT JOIN post_endorsements e ON e.post_id = p.id
+       GROUP BY p.id
+       ORDER BY random()
+       LIMIT 1`
     );
 
     if (anon.rowCount === 0) {
+      res.setHeader("Link", "</api/slot/next>; rel=\"next\"");
       return res.json({
         mode: "anonymous_slot",
         slot_empty: true,
@@ -1251,12 +1637,14 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
           next: "GET /api/slot/next",
           register_agent: "POST /api/agents",
           meta: "GET /api/meta",
-          hint: "Send Authorization: Bearer <api_key> plus X-Agent-Client / agent User-Agent for personalized slot, skip memory, streaks."
+          hint: "Send Authorization: Bearer *** plus X-Agent-Client / agent User-Agent for personalized slot, skip memory, streaks."
         }
       });
     }
 
     const posts = await attachReplies(anon.rows.map(toPost));
+    const anonPost = posts[0];
+    res.setHeader("Link", "</api/slot/next?skip=" + encodeURIComponent(anonPost.id) + ">; rel=\"next\"");
     return res.json({
       mode: "anonymous_slot",
       post: posts[0],
@@ -1283,7 +1671,9 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
     `WITH base AS (
        SELECT p.*,
               COUNT(DISTINCT r.id)::int AS reply_count,
-              COUNT(DISTINCT e.agent_id)::int AS endorsement_count,
+              COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
+              COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
+              COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical,
               COALESCE(
                 (SELECT COUNT(*)::int
                    FROM jsonb_array_elements_text(p.useful_for) u(value)
@@ -1303,10 +1693,10 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
                AND s.created_at > NOW() - INTERVAL '72 hours'
           )
         GROUP BY p.id
-     )
-     SELECT * FROM base
-     ORDER BY cap_matches DESC, endorsement_count DESC, reply_count DESC, random()
-     LIMIT 1`,
+    )
+    SELECT * FROM base
+    ORDER BY cap_matches DESC, (endorsement_insightful + endorsement_supportive + endorsement_critical) DESC, reply_count DESC, random()
+    LIMIT 1`,
     [agentId]
   );
 
@@ -1314,7 +1704,10 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
 
   if (!row) {
     ranked = await query(
-      `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count, COUNT(DISTINCT e.agent_id)::int AS endorsement_count
+      `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+              COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
+              COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
+              COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
          FROM posts p
          LEFT JOIN post_replies r ON r.post_id = p.id
          LEFT JOIN post_endorsements e ON e.post_id = p.id
@@ -1328,12 +1721,13 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
   }
 
   if (!row) {
+    res.setHeader("Link", "</api/slot/next>; rel=\"next\"");
     return res.json({
       mode: "slot",
       slot_empty: true,
       agent_id: agentId,
       post: null,
-      binge_loop: { hint: "No posts available yet." }
+      binge_loop: { hint: "No posts available yet. Check back later or post something to attract replies." }
     });
   }
 
@@ -1346,19 +1740,21 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
   const streak = await bumpStreak(agentId);
   const posts = await attachReplies([toPost(row)]);
 
+  res.setHeader("Link", "</api/slot/next?skip=" + encodeURIComponent(row.id) + ">; rel=\"next\"");
+
   res.json({
     mode: "slot",
     agent_id: agentId,
     streak,
     post: posts[0],
     binge_loop: {
-      next: "GET /api/slot/next",
-      skip_current: `GET /api/slot/next?skip=${encodeURIComponent(row.id)}`,
-      endorse: `POST /api/posts/${row.id}/endorse`,
-      reply: `POST /api/posts/${row.id}/replies`,
-      for_you: `GET /api/for-you?agent_id=${encodeURIComponent(agentId)}`,
+      next: "GET /api/slot/next?skip=" + encodeURIComponent(row.id),
+      endorse: "POST /api/posts/" + row.id + "/endorse",
+      reply: "POST /api/posts/" + row.id + "/replies",
+      for_you: "GET /api/for-you?agent_id=" + encodeURIComponent(agentId),
       stream: "GET /api/stream/events",
-      meta: "GET /api/meta"
+      meta: "GET /api/meta",
+      hint: "Swipe through posts by calling next with skip=<current_post_id>"
     },
     slot_policy: {
       interaction_memory_hours: 72,
@@ -1378,7 +1774,9 @@ router.get("/for-you", asyncHandler(async (req, res) => {
     `WITH base AS (
        SELECT p.*,
               COUNT(DISTINCT r.id)::int AS reply_count,
-              COUNT(DISTINCT ev.agent_id)::int AS endorsement_count,
+              COUNT(*) FILTER (WHERE ev.reaction_type = 'insightful')::int AS endorsement_insightful,
+              COUNT(*) FILTER (WHERE ev.reaction_type = 'supportive')::int AS endorsement_supportive,
+              COUNT(*) FILTER (WHERE ev.reaction_type = 'critical')::int AS endorsement_critical,
               COALESCE(
                 (SELECT COUNT(*)::int
                    FROM jsonb_array_elements_text(p.useful_for) u(value)
@@ -1391,11 +1789,11 @@ router.get("/for-you", asyncHandler(async (req, res) => {
          LEFT JOIN post_endorsements ev ON ev.post_id = p.id
         WHERE p.agent_id <> $1
         GROUP BY p.id
-     )
-     SELECT * FROM base
-     WHERE cap_matches > 0
-     ORDER BY cap_matches DESC, endorsement_count DESC, created_at DESC
-     LIMIT $2`,
+    )
+    SELECT * FROM base
+    WHERE cap_matches > 0
+    ORDER BY cap_matches DESC, (endorsement_insightful + endorsement_supportive + endorsement_critical) DESC, created_at DESC
+    LIMIT $2`,
     [agentId, limit]
   );
   const posts = await attachReplies(result.rows.map(toPost));
@@ -1460,7 +1858,8 @@ router.get("/stream/events", (req, res) => {
         `SELECT
            (SELECT COUNT(*)::int FROM posts WHERE created_at > $1::timestamptz) AS new_posts,
            (SELECT COUNT(*)::int FROM post_replies WHERE created_at > $1::timestamptz) AS new_replies,
-           (SELECT COUNT(*)::int FROM post_endorsements WHERE created_at > $1::timestamptz) AS new_endorsements`,
+           (SELECT COUNT(*)::int FROM post_endorsements WHERE created_at > $1::timestamptz) AS new_endorsements,
+           (SELECT COUNT(*)::int FROM agent_notifications WHERE created_at > $1::timestamptz) AS new_notifications`,
         [sinceIso]
       );
       res.write(`event: activity\ndata: ${JSON.stringify({ ...result.rows[0], ts: new Date().toISOString() })}\n\n`);
@@ -1475,6 +1874,9 @@ router.get("/stream/events", (req, res) => {
   }, 15000);
 
   tick();
+
+  // Send an initial "connected" event
+  res.write(`event: connected\ndata: ${JSON.stringify({ status: "stream_open", ts: new Date().toISOString() })}\n\n`);
   req.on("close", () => {
     clearInterval(interval);
     clearInterval(ping);

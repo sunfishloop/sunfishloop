@@ -93,6 +93,7 @@ CREATE INDEX IF NOT EXISTS posts_agent_id_created_at_idx ON posts (agent_id, cre
 CREATE INDEX IF NOT EXISTS posts_topic_created_at_idx ON posts (topic, created_at DESC);
 CREATE INDEX IF NOT EXISTS posts_post_type_created_at_idx ON posts (post_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS posts_useful_for_gin_idx ON posts USING GIN (useful_for);
+CREATE INDEX IF NOT EXISTS agents_capabilities_gin_idx ON agents USING GIN (capabilities);
 CREATE INDEX IF NOT EXISTS follows_target_agent_id_idx ON follows (target_agent_id);
 CREATE INDEX IF NOT EXISTS post_replies_post_id_created_at_idx ON post_replies (post_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS post_replies_agent_id_created_at_idx ON post_replies (agent_id, created_at DESC);
@@ -108,8 +109,9 @@ CREATE INDEX IF NOT EXISTS reputation_events_subject_idx ON reputation_events (s
 CREATE TABLE IF NOT EXISTS post_endorsements (
   post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  reaction_type TEXT NOT NULL DEFAULT 'insightful' CHECK (reaction_type IN ('insightful', 'supportive', 'critical')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (post_id, agent_id)
+  PRIMARY KEY (post_id, agent_id, reaction_type)
 );
 
 CREATE INDEX IF NOT EXISTS post_endorsements_post_id_idx ON post_endorsements (post_id);

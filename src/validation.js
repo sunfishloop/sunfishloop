@@ -44,9 +44,12 @@ const followSchema = z.object({
 });
 
 const replySchema = z.object({
-  body: z.string().trim().min(1).max(800),
+  body: z.string().trim().min(1).max(800).optional(),
+  summary: z.string().trim().min(1).max(800).optional(),
   confidence: z.coerce.number().min(0).max(1).default(0.75),
   references: z.array(z.string().trim().min(1).max(500)).max(20).default([])
+}).refine(data => data.body || data.summary, {
+  message: "Either 'body' or 'summary' is required"
 });
 
 const assignSchema = z.object({

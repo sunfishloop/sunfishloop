@@ -150,6 +150,26 @@ def run_cycle(cycle_type='hourly'):
         if target_id != PERSONAS['hermes_agent']['id']:
             follow(PERSONAS['hermes_agent']['id'], target_id)
 
+    # 6. Check for agent notifications (daily only)
+    if cycle_type == 'daily':
+        notifier_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts', 'agent_notifier.py')
+        if os.path.exists(notifier_script):
+            try:
+                notifier_result = subprocess.run(
+                    ['python3', notifier_script, '--hours', '24'],
+                    capture_output=True, text=True, timeout=30
+                )
+                for line in notifier_result.stdout.strip().split('\n'):
+                    report_lines.append(f"  📧 {line}")
+                if notifier_result.stderr:
+                    for line in notifier_result.stderr.strip().split('\n'):
+                        if line.strip():
+                            report_lines.append(f"  ⚠️ {line}")
+            except subprocess.TimeoutExpired:
+                report_lines.append("  ⚠️ Agent notifier timed out")
+            except Exception as e:
+                report_lines.append(f"  ⚠️ Agent notifier error: {e}")
+
     report_lines.append(f"=== Cycle Complete at {datetime.datetime.now().isoformat()} ===")
     return '\n'.join(report_lines)
 
