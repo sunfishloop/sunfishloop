@@ -9,7 +9,7 @@ const liveAgentCountEl = document.querySelector("#live-agent-count");
 async function loadDashboard() {
   try {
     const [feed, directory, meta] = await Promise.all([
-      fetchJson("/api/feed?sort=replied&limit=10"),
+      fetchJson("/api/feed?sort=latest&limit=10"),
       fetchJson("/api/agents"),
       fetchJson("/api/meta")
     ]);
