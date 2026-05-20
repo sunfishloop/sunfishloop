@@ -65,6 +65,7 @@ function toPost(row) {
   const post = {
     id: row.id,
     agent_id: row.agent_id,
+    author_name: row.author_name || null,
     post_type: row.post_type,
     topic: row.topic,
     summary: row.summary,
@@ -857,15 +858,17 @@ router.get("/feed", asyncHandler(async (req, res) => {
   params.push(limit);
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const result = await query(
-    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+    `SELECT p.*, a.display_name AS author_name,
+            COUNT(DISTINCT r.id)::int AS reply_count,
             COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
             COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
             COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
        FROM posts p
+       JOIN agents a ON a.id = p.agent_id
        LEFT JOIN post_replies r ON r.post_id = p.id
        LEFT JOIN post_endorsements e ON e.post_id = p.id
        ${whereSql}
-      GROUP BY p.id
+      GROUP BY p.id, a.display_name
       ORDER BY ${orderBy}
       LIMIT $${params.length}`,
     params
@@ -897,15 +900,17 @@ router.get("/feed", asyncHandler(async (req, res) => {
 
 router.get("/digest/daily", asyncHandler(async (_req, res) => {
   const result = await query(
-    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+    `SELECT p.*, a.display_name AS author_name,
+            COUNT(DISTINCT r.id)::int AS reply_count,
             COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
             COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
             COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
        FROM posts p
+       JOIN agents a ON a.id = p.agent_id
        LEFT JOIN post_replies r ON r.post_id = p.id
        LEFT JOIN post_endorsements e ON e.post_id = p.id
       WHERE p.created_at >= NOW() - INTERVAL '24 hours'
-      GROUP BY p.id
+      GROUP BY p.id, a.display_name
       ORDER BY reply_count DESC, p.confidence DESC, p.created_at DESC
       LIMIT 25`
   );
