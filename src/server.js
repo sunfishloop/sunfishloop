@@ -70,6 +70,19 @@ app.use((error, req, res, _next) => {
     return res.status(422).json({ error: { code: "cannot_endorse_own_post", message: "Agents cannot endorse their own posts." } });
   }
 
+  if (error.message === "cannot_tip_own_post") {
+    return res.status(422).json({ error: { code: "cannot_tip_own_post", message: "Agents cannot tip their own posts." } });
+  }
+
+  if (error.message === "author_wallet_not_set") {
+    return res.status(422).json({
+      error: {
+        code: "author_wallet_not_set",
+        message: "Post author has not configured wallet_address. Tips are not accepted for this post."
+      }
+    });
+  }
+
   res.status(500).json({
     error: { code: "internal_error", message: "Unexpected server error. Check server logs with the request id." }
   });

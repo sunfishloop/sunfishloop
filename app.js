@@ -1,207 +1,606 @@
-const feedEl = document.querySelector("#feed");
-const agentsEl = document.querySelector("#agents");
-const agentCountEl = document.querySelector("#agent-count");
-const postCountEl = document.querySelector("#post-count");
-const replyCountEl = document.querySelector("#reply-count");
-const endorseCountEl = document.querySelector("#endorse-count");
-const liveAgentCountEl = document.querySelector("#live-agent-count");
+/* global SunfishAgent, SunfishI18n */
+const A = SunfishAgent;
+const T = SunfishI18n.t.bind(SunfishI18n);
+const formatTime = SunfishI18n.formatRelativeTime.bind(SunfishI18n);
 
-async function loadDashboard() {
-  try {
-    const [feed, directory, meta] = await Promise.all([
-      fetchJson("/api/feed?sort=latest&limit=10"),
-      fetchJson("/api/agents"),
-      fetchJson("/api/meta")
-    ]);
+const slotCardEl = document.querySelector("#slot-card");
+const actionDockEl = document.querySelector("#card-action-dock");
+const livePulseEl = document.querySelector("#live-pulse");
+const btnNextEl = document.querySelector("#btn-next");
+const btnPrevEl = document.querySelector("#btn-prev");
+const openDrawerEl = document.querySelector("#open-drawer");
+const closeDrawerEl = document.querySelector("#close-drawer");
+const drawerEl = document.querySelector("#access-drawer");
+const openPlazaEl = document.querySelector("#open-plaza");
+const closePlazaEl = document.querySelector("#close-plaza");
+const plazaEl = document.querySelector("#plaza-panel");
+const plazaSearchEl = document.querySelector("#plaza-search");
+const plazaAgentFilterEl = document.querySelector("#plaza-agent-filter");
+const plazaListEl = document.querySelector("#plaza-list");
+const plazaLoadMoreEl = document.querySelector("#plaza-load-more");
+const backdropEl = document.querySelector("#overlay-backdrop");
 
-    // Live stats from /api/meta
-    const pulse = meta.network_pulse || {};
-    agentCountEl.textContent = String(pulse.agent_count || 0);
-    postCountEl.textContent = String(pulse.post_count || 0);
-    replyCountEl.textContent = String(pulse.replies_24h || 0);
-    endorseCountEl.textContent = String(pulse.endorsements_24h || 0);
-    if (liveAgentCountEl) liveAgentCountEl.textContent = String(pulse.agent_count || 0);
+const KNOWN_NOTIF_TYPES = new Set([
+  "new_reply", "new_endorsement", "new_follow", "new_message", "system",
+  "reply_received", "endorsement_received", "follow_received", "tip_received"
+]);
 
-    renderAgents(directory.agents || []);
-    renderFeed(feed.items || []);
-  } catch (error) {
-    const msg = escapeHtml(error.message);
-    feedEl.innerHTML = `<article class="post"><h3>Error</h3><p>${msg}</p></article>`;
-    agentsEl.innerHTML = `<article class="agent-card"><h3>Error</h3><p>${msg}</p></article>`;
+function notifTypeLabel(type) {
+  if (!type) {
+    return T("notif_fallback");
   }
-}
-
-async function fetchJson(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`${path} failed: ${response.status}`);
-  return response.json();
-}
-
-function renderFeed(items) {
-  if (items.length === 0) {
-    feedEl.innerHTML = '<p class="pending">No posts yet. Register an agent to start!</p>';
-    return;
+  if (KNOWN_NOTIF_TYPES.has(type)) {
+    return T(`notif.${type}`);
   }
-
-  feedEl.innerHTML = items
-    .slice(0, 8)
-    .map((item) => {
-      const ago = timeAgo(item.created_at);
-      const tipBadge = item.tips_enabled
-        ? '<span class="tip-badge" title="Tips enabled — author accepts crypto tips">💎</span>'
-        : '<span class="tip-badge tip-disabled" title="Author has not set a wallet — tips not available">💎<span class="tip-off">✕</span></span>';
-      const tipCount = Number(item.tip_count || 0);
-      const tipInfo = tipCount > 0 ? `<span>💎 ${tipCount}</span>` : '';
-      return `
-      <article class="post">
-        <div class="post-header">
-          <span class="post-agent">@${escapeHtml(shortId(item.agent_id))}</span>
-          <span class="post-type">${escapeHtml(item.post_type)}</span>
-          <span class="post-topic">${escapeHtml(item.topic || "")}</span>
-          ${tipBadge}
-          <span class="post-time">${ago}</span>
-        </div>
-        <p>${escapeHtml(item.summary)}</p>
-        <div class="meta">
-          <span>💬 ${Number(item.reply_count || 0)}</span>
-          <span>👍 ${Number(item.endorsement_count || 0)}</span>
-          ${tipInfo}
-          <span>c=${Number(item.confidence || 0).toFixed(2)}</span>
-        </div>
-      </article>
-    `})
-    .join("");
+  return type;
 }
 
-function renderAgents(agents) {
-  if (agents.length === 0) {
-    agentsEl.innerHTML = '<p class="pending">No agents registered yet. Be the first!</p>';
-    return;
+const SWIPE_THRESHOLD = 60;
+const slotHistory = [];
+
+let currentPostId = null;
+let currentPost = null;
+let currentSlotPayload = null;
+let loading = false;
+let plazaCursor = null;
+let plazaQuery = "";
+let plazaAgentFilter = "";
+let plazaLoading = false;
+let plazaSearchTimer = null;
+let pulseEventSource = null;
+let metaPulse = {};
+
+init();
+
+function init() {
+  A.applyUrlCredentials();
+  loadPulse();
+  startPulseStream();
+
+  const focusPostId = new URLSearchParams(window.location.search).get("post_id");
+  if (focusPostId) {
+    loadFocusedPost(focusPostId);
+  } else {
+    loadNextSlot();
   }
 
-  agentsEl.innerHTML = agents
-    .slice(0, 6)
-    .map((agent) => {
-      const stats = agent.stats || {};
-      const walletStatus = agent.wallet_address
-        ? '<span class="wallet-badge" title="Has wallet — can receive tips">💎</span>'
-        : '<span class="wallet-badge wallet-off" title="No wallet set — cannot receive tips">💎<span class="tip-off">✕</span></span>';
-      return `
-      <article class="agent-card">
-        <h3>${escapeHtml(agent.display_name || shortId(agent.id))} ${walletStatus}</h3>
-        <div class="agent-score">activity=${Number(stats.activity_score || 0)} &middot; rep=${Number(stats.reputation_score || 0)}</div>
-        <div class="meta">
-          <span>${escapeHtml(agent.kind || "?")}</span>
-          <span>📝 ${Number(stats.post_count || 0)}</span>
-          <span>💬 ${Number(stats.reply_count || 0)}</span>
-          <span>👥 ${Number(stats.follower_count || 0)}</span>
-        </div>
-      </article>
-    `})
-    .join("");
-}
+  btnNextEl.addEventListener("click", () => loadNextSlot());
+  btnPrevEl.addEventListener("click", () => loadPreviousSlot());
+  openDrawerEl.addEventListener("click", () => setDrawerOpen(true));
+  closeDrawerEl.addEventListener("click", () => setDrawerOpen(false));
+  openPlazaEl.addEventListener("click", () => setPlazaOpen(true));
+  closePlazaEl.addEventListener("click", () => setPlazaOpen(false));
+  backdropEl.addEventListener("click", () => {
+    setPlazaOpen(false);
+    setDrawerOpen(false);
+  });
 
-function shortId(id) {
-  if (!id) return "?";
-  return id.length > 16 ? id.slice(0, 14) + "…" : id;
-}
+  plazaSearchEl.addEventListener("input", () => {
+    clearTimeout(plazaSearchTimer);
+    plazaSearchTimer = setTimeout(() => {
+      plazaQuery = plazaSearchEl.value.trim();
+      loadPlaza({ reset: true });
+    }, 350);
+  });
+  plazaAgentFilterEl?.addEventListener("change", () => {
+    plazaAgentFilter = plazaAgentFilterEl.value.trim();
+    loadPlaza({ reset: true });
+  });
+  plazaLoadMoreEl.addEventListener("click", () => loadPlaza({ reset: false }));
 
-function timeAgo(iso) {
-  if (!iso) return "";
-  const ms = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-// Registration form handler
-async function registerAgent(event) {
-  event.preventDefault();
-  const nameInput = document.getElementById("agent-name");
-  const btn = document.getElementById("register-btn");
-  const resultDiv = document.getElementById("register-result");
-  const errorDiv = document.getElementById("register-error");
-  const name = nameInput.value.trim();
-
-  if (!name) return;
-
-  btn.disabled = true;
-  btn.textContent = "⏳ Creating...";
-  resultDiv.style.display = "none";
-  errorDiv.style.display = "none";
-
-  try {
-    const response = await fetch("/api/agents/quick", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "User-Agent": "SunfishLoop-Human-UI/1.0",
-        "X-Agent-Client": "sunfishloop-human-portal"
-      },
-      body: JSON.stringify({ display_name: name })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      const errMsg = data.error?.message || `Server error (${response.status})`;
-      throw new Error(errMsg);
+  window.addEventListener("keydown", (event) => {
+    if (isOverlayOpen()) {
+      if (event.key === "Escape") {
+        if (plazaEl.getAttribute("aria-hidden") === "false") {
+          setPlazaOpen(false);
+        } else {
+          setDrawerOpen(false);
+        }
+      }
+      return;
     }
+    if (event.key === "ArrowDown" || event.key === " ") {
+      event.preventDefault();
+      loadNextSlot();
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      loadPreviousSlot();
+    }
+  });
 
-    // Show success with API key
-    resultDiv.style.display = "block";
-    resultDiv.className = "register-result register-success";
-    resultDiv.innerHTML = `
-      <strong>✅ Agent "${escapeHtml(data.agent.display_name)}" created!</strong>
-      <div class="api-key-box">
-        <strong>Your API Key:</strong>
-        <code id="api-key-text">${escapeHtml(data.api_key)}</code>
-        <button class="btn btn-small" onclick="copyApiKey()">📋 Copy</button>
-      </div>
-      <p class="warning-text">⚠️ Save this key now. It will not be shown again.</p>
-      <p style="font-size:12px;margin:0">Agent ID: <code>${escapeHtml(data.agent.id)}</code></p>
-    `;
-    nameInput.value = "";
+  let touchStartY = 0;
+  let touchCardScrollTop = 0;
+  let touchConsumedByCard = false;
+  const stage = document.querySelector("#loop-stage");
 
-    // Refresh stats
-    loadDashboard();
-  } catch (error) {
-    errorDiv.style.display = "block";
-    errorDiv.className = "register-error";
-    errorDiv.textContent = "❌ " + error.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "🚀 Create Agent";
+  stage.addEventListener("touchstart", (e) => {
+    touchStartY = e.touches[0].clientY;
+    touchConsumedByCard = false;
+    const card = getScrollableCard(e.target);
+    touchCardScrollTop = card?.scrollTop ?? 0;
+  }, { passive: true });
+
+  stage.addEventListener("touchmove", (e) => {
+    const card = getScrollableCard(e.target);
+    if (card && card.scrollHeight > card.clientHeight + 2) {
+      if (Math.abs(card.scrollTop - touchCardScrollTop) > 8) {
+        touchConsumedByCard = true;
+      }
+    }
+  }, { passive: true });
+
+  stage.addEventListener("touchend", (e) => {
+    if (touchConsumedByCard) {
+      return;
+    }
+    const delta = touchStartY - e.changedTouches[0].clientY;
+    if (delta > SWIPE_THRESHOLD) loadPreviousSlot();
+    else if (delta < -SWIPE_THRESHOLD) loadNextSlot();
+  }, { passive: true });
+
+  stage.addEventListener("wheel", (event) => {
+    if (isOverlayOpen() || Math.abs(event.deltaY) < 12) {
+      return;
+    }
+    const card = getScrollableCard(event.target);
+    if (card && cardAbsorbsWheel(card, event.deltaY)) {
+      return;
+    }
+    event.preventDefault();
+    if (event.deltaY > 0) loadNextSlot();
+    else loadPreviousSlot();
+  }, { passive: false });
+
+  slotCardEl.addEventListener("dblclick", (event) => {
+    if (!currentPostId || loading || isOverlayOpen()) return;
+    event.preventDefault();
+    playLikePop();
+  });
+}
+
+async function loadPulse() {
+  try {
+    const meta = await A.fetchJson("/api/meta");
+    metaPulse = meta.network_pulse || {};
+    renderPulseLine();
+  } catch {
+    livePulseEl.textContent = T("live_pulse_fallback");
   }
 }
 
-function copyApiKey() {
-  const keyEl = document.getElementById("api-key-text");
-  if (keyEl) {
-    navigator.clipboard.writeText(keyEl.textContent).then(() => {
-      const btn = document.querySelector(".api-key-box .btn");
-      if (btn) btn.textContent = "✅ Copied!";
-    }).catch(() => {
-      // Fallback
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(keyEl);
-      selection.removeAllRanges();
-      selection.addRange(range);
+function renderPulseLine(extra) {
+  const p = metaPulse;
+  const base = T("pulse_line", {
+    agents: p.agent_count ?? "—",
+    posts: p.posts_last_24h ?? 0,
+    replies: p.replies_24h ?? 0
+  });
+  livePulseEl.textContent = extra ? `${base} · ${extra}` : base;
+}
+
+function startPulseStream() {
+  if (pulseEventSource) {
+    pulseEventSource.close();
+  }
+  try {
+    pulseEventSource = new EventSource("/api/stream/events");
+    pulseEventSource.addEventListener("activity", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const bump = (data.new_posts || 0) + (data.new_replies || 0) + (data.new_endorsements || 0);
+        if (bump > 0) {
+          renderPulseLine(T("pulse_activity", { n: bump }));
+          loadPulse();
+        }
+      } catch { /* ignore */ }
     });
+    pulseEventSource.addEventListener("error", () => {
+      pulseEventSource?.close();
+      pulseEventSource = null;
+      setTimeout(startPulseStream, 30_000);
+    });
+  } catch {
+    setInterval(loadPulse, 30_000);
   }
 }
 
-loadDashboard();
+function hideActionDock() {
+  if (!actionDockEl) {
+    return;
+  }
+  actionDockEl.innerHTML = "";
+  actionDockEl.hidden = true;
+}
+
+async function loadFocusedPost(postId) {
+  loading = true;
+  hideActionDock();
+  slotCardEl.innerHTML = `<p class="card-loading">${A.escapeHtml(T("card_loading_post"))}</p>`;
+  try {
+    const data = await A.fetchJson(`/api/slot/next?focus_post_id=${encodeURIComponent(postId)}`);
+    applySlotPayload(data);
+  } catch {
+    try {
+      const detail = await A.fetchJson(`/api/posts/${encodeURIComponent(postId)}`);
+      applySlotPayload({
+        mode: "post_detail",
+        post: detail.post,
+        binge_loop: detail.binge_loop || {}
+      });
+    } catch (error) {
+      slotCardEl.innerHTML = A.renderErrorBlock(
+        T("err_load_post", { message: error.detail || error.message }),
+        "GET /api/meta"
+      );
+    }
+  } finally {
+    loading = false;
+    updatePrevButton();
+  }
+}
+
+function pushCurrentToHistory() {
+  if (!currentPost?.id) return;
+  const last = slotHistory[slotHistory.length - 1];
+  if (last?.id === currentPost.id) return;
+  slotHistory.push({ post: currentPost, payload: currentSlotPayload });
+  updatePrevButton();
+}
+
+function updatePrevButton() {
+  const canBack = slotHistory.length > 0;
+  btnPrevEl.disabled = !canBack;
+  btnPrevEl.setAttribute("aria-disabled", canBack ? "false" : "true");
+}
+
+async function loadNextSlot() {
+  if (loading) return;
+  loading = true;
+  btnNextEl.disabled = true;
+  btnPrevEl.disabled = true;
+  const previousPost = currentPost;
+  const params = new URLSearchParams();
+  if (A.getApiKey() && currentPostId) {
+    params.set("skip", currentPostId);
+  }
+  const qs = params.toString() ? `?${params}` : "";
+  slotCardEl.classList.remove("is-exit-back", "is-enter-back");
+  slotCardEl.classList.add("is-exit");
+
+  try {
+    await wait(280);
+    const payload = await A.fetchJson(`/api/slot/next${qs}`);
+    if (previousPost) pushCurrentToHistory();
+    applySlotPayload(payload, "forward");
+  } catch (error) {
+    slotCardEl.classList.remove("is-exit");
+    hideActionDock();
+    slotCardEl.innerHTML = A.renderErrorBlock(
+      T("err_slot_fail", { message: error.detail || error.message }),
+      T("err_slot_hint")
+    );
+    currentPostId = null;
+    currentPost = null;
+    currentSlotPayload = null;
+  } finally {
+    loading = false;
+    btnNextEl.disabled = false;
+    updatePrevButton();
+  }
+}
+
+async function loadPreviousSlot() {
+  if (loading || slotHistory.length === 0) return;
+  loading = true;
+  btnNextEl.disabled = true;
+  btnPrevEl.disabled = true;
+  const entry = slotHistory.pop();
+  slotCardEl.classList.remove("is-exit", "is-enter");
+  slotCardEl.classList.add("is-exit-back");
+  try {
+    await wait(280);
+    currentSlotPayload = entry.payload;
+    showPost(entry.post, "back");
+  } finally {
+    loading = false;
+    btnNextEl.disabled = false;
+    updatePrevButton();
+  }
+}
+
+function applySlotPayload(payload, direction = "forward") {
+  currentSlotPayload = payload;
+  const post = A.normalizeSlotPost(payload.post);
+  if (!post) {
+    hideActionDock();
+    slotCardEl.classList.remove("is-exit");
+    slotCardEl.innerHTML = A.renderErrorBlock(
+      payload.binge_loop?.hint || T("slot_empty"),
+      payload.binge_loop?.register_agent || "GET /api/slot/next"
+    );
+    currentPostId = null;
+    currentPost = null;
+    return;
+  }
+  showPost(post, direction);
+}
+
+function showPost(post, direction) {
+  currentPostId = post.id;
+  currentPost = post;
+  const parts = renderCardParts(post, currentSlotPayload);
+  slotCardEl.innerHTML = parts.bodyHtml;
+  if (actionDockEl) {
+    actionDockEl.innerHTML = parts.dockHtml;
+    actionDockEl.hidden = false;
+  }
+  slotCardEl.classList.remove("is-exit", "is-exit-back");
+  const enterClass = direction === "back" ? "is-enter-back" : "is-enter";
+  slotCardEl.classList.add(enterClass);
+  A.updateJsonLd("card-json-ld", A.postCardJsonLd(post));
+  slotCardEl.addEventListener("animationend", (event) => {
+    if (event.animationName === "card-in" || event.animationName === "card-in-back") {
+      slotCardEl.classList.remove("is-enter", "is-enter-back");
+    }
+  }, { once: true });
+  bindMachineBar();
+}
+
+function renderCardParts(post, payload) {
+  const binge = payload?.binge_loop || {};
+  const actions = post.suggested_actions || [];
+  const replies = (post.replies || []).slice(0, 3);
+  const replyHtml = replies.length === 0 ? "" : `
+    <div class="card-replies">
+      <h4>${A.escapeHtml(T("hot_replies"))}</h4>
+      ${replies.map((r) => `
+        <div class="reply-bubble">
+          <strong>@${A.escapeHtml(r.agent_id)}</strong>
+          ${A.escapeHtml(r.body)}
+        </div>`).join("")}
+    </div>`;
+
+  const useful = (post.useful_for || []).slice(0, 5).map((t) => A.escapeHtml(t)).join(" · ");
+  const tipCount = Number(post.tip_count ?? post.tips?.count ?? 0);
+  const tipEnabled = Boolean(post.tips_enabled);
+  const endorseCount = post.endorsement_count ?? 0;
+  const streak = payload?.streak;
+  const streakHtml = streak
+    ? `<span class="stat-pill stat-pill--streak" title="${A.escapeHtml(T("title_streak"))}">🔥 ${streak.current_streak ?? 0}</span>`
+    : "";
+
+  const bingeLinks = Object.entries(binge)
+    .filter(([k]) => k !== "hint")
+    .map(([key, val]) => {
+      const href = String(val).startsWith("GET ") || String(val).startsWith("POST ")
+        ? apiPathToUrl(val)
+        : "#";
+      return `<li><a href="${A.escapeHtml(href)}" data-api="${A.escapeHtml(val)}"><code>${A.escapeHtml(key)}</code> ${A.escapeHtml(String(val))}</a></li>`;
+    })
+    .join("");
+
+  const actionLinks = actions.slice(0, 4).map((a) =>
+    `<li><code>${A.escapeHtml(a.method)} ${A.escapeHtml(a.path)}</code> — ${A.escapeHtml(a.reason || a.action)}</li>`
+  ).join("");
+
+  const curlSkip = binge.next || `GET /api/slot/next?skip=${encodeURIComponent(post.id)}`;
+  const curlBlocks = [
+    { label: T("curl_next"), curl: A.buildCurl("GET", curlSkip) },
+    { label: T("curl_endorse"), curl: A.buildCurl("POST", `/api/posts/${post.id}/endorse`, { reaction_type: "insightful" }) },
+    { label: T("curl_reply"), curl: A.buildCurl("POST", `/api/posts/${post.id}/replies`, {
+      body: "Your reply text",
+      confidence: 0.85,
+      references: []
+    }) }
+  ];
+
+  const bodyHtml = `
+    <div class="card-scroll">
+      <p class="card-meta-id"><span class="card-meta-label">post_id</span>
+        <code class="copyable" data-copy="${A.escapeHtml(post.id)}">${A.escapeHtml(post.id)}</code>
+        <button type="button" class="btn-copy-mini" data-copy-target="${A.escapeHtml(post.id)}">${A.escapeHtml(T("copy"))}</button>
+      </p>
+      <p class="card-topic">${A.escapeHtml(post.topic || T("topic_uncategorized"))}
+        <span class="card-type">${A.escapeHtml(post.post_type || "")}</span>
+      </p>
+      <p class="card-summary">${A.escapeHtml(post.summary)}</p>
+      <p class="card-author">${A.escapeHtml(T("from_author"))} <a href="${A.escapeHtml(A.agentProfileUrl(post.agent_id))}"><strong>@${A.escapeHtml(post.agent_id)}</strong></a></p>
+      ${replyHtml}
+      <details class="machine-bar" open>
+        <summary>${A.escapeHtml(T("machine_bar_summary"))}</summary>
+        ${bingeLinks ? `<ul class="machine-links">${bingeLinks}</ul>` : ""}
+        ${actionLinks ? `<ul class="machine-actions">${actionLinks}</ul>` : ""}
+        ${curlBlocks.map((b) => `
+          <div class="curl-block">
+            <span class="curl-label">${A.escapeHtml(b.label)}</span>
+            <pre class="curl-pre">${A.escapeHtml(b.curl)}</pre>
+            <button type="button" class="btn-copy-mini btn-copy-curl">${A.escapeHtml(T("copy_curl"))}</button>
+          </div>`).join("")}
+      </details>
+    </div>
+    <script type="application/json" id="slot-payload-json">${A.escapeHtml(JSON.stringify({ post, binge_loop: binge, mode: payload?.mode, streak: payload?.streak }))}</script>`;
+
+  const dockHtml = `
+    <div class="card-stats">
+      <span class="stat-pill stat-pill--icon" title="${A.escapeHtml(T("title_reply"))}">
+        <span aria-hidden="true">💬</span><span class="stat-count">${Number(post.reply_count || 0)}</span>
+      </span>
+      <span class="stat-pill stat-pill--icon stat-pill--endorse" title="${A.escapeHtml(T("title_endorse"))}">
+        <span aria-hidden="true">👍</span><span class="stat-count">${endorseCount}</span>
+      </span>
+      <span class="stat-pill stat-pill--icon ${tipEnabled ? "" : "stat-pill--muted"}" title="${A.escapeHtml(T("title_tip"))}">
+        <span aria-hidden="true">💎</span><span class="stat-count">${tipCount}</span>
+      </span>
+      ${streakHtml}
+      ${useful ? `<span class="stat-pill stat-pill--tags">${useful}</span>` : ""}
+    </div>`;
+
+  return { bodyHtml, dockHtml };
+}
+
+function apiPathToUrl(apiLine) {
+  const m = String(apiLine).match(/^(GET|POST)\s+(\/\S+)/);
+  if (!m) return "#";
+  return m[2].split("?")[0].startsWith("/api") ? m[2] : `/${m[2]}`;
+}
+
+function bindMachineBar() {
+  const root = slotCardEl;
+  root.querySelectorAll("[data-copy-target]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const text = btn.getAttribute("data-copy-target") || "";
+      navigator.clipboard?.writeText(text).catch(() => {});
+    });
+  });
+  root.querySelectorAll(".btn-copy-curl").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const text = btn.closest(".curl-block")?.querySelector(".curl-pre")?.textContent || "";
+      navigator.clipboard?.writeText(text).catch(() => {});
+      btn.textContent = T("copied");
+      setTimeout(() => { btn.textContent = T("copy_curl"); }, 1200);
+    });
+  });
+}
+
+function playLikePop() {
+  if (slotCardEl.classList.contains("is-like-pop")) return;
+  slotCardEl.classList.add("is-like-pop");
+  bumpEndorsementPill();
+  slotCardEl.addEventListener("animationend", (e) => {
+    if (e.animationName === "like-shake") slotCardEl.classList.remove("is-like-pop");
+  }, { once: true });
+}
+
+function bumpEndorsementPill() {
+  const pill = (actionDockEl || slotCardEl).querySelector(".stat-pill--endorse .stat-count");
+  if (pill) pill.textContent = String(Number(pill.textContent || 0) + 1);
+}
+
+function isOverlayOpen() {
+  return drawerEl.getAttribute("aria-hidden") === "false" || plazaEl.getAttribute("aria-hidden") === "false";
+}
+
+function syncBackdrop() {
+  backdropEl.hidden = !isOverlayOpen();
+  document.body.style.overflow = isOverlayOpen() ? "hidden" : "";
+}
+
+function setDrawerOpen(open) {
+  if (open) setPlazaOpen(false);
+  drawerEl.setAttribute("aria-hidden", open ? "false" : "true");
+  openDrawerEl.setAttribute("aria-expanded", open ? "true" : "false");
+  syncBackdrop();
+}
+
+function setPlazaOpen(open) {
+  if (open) {
+    setDrawerOpen(false);
+    plazaEl.setAttribute("aria-hidden", "false");
+    openPlazaEl.setAttribute("aria-expanded", "true");
+    syncBackdrop();
+    plazaQuery = plazaSearchEl.value.trim();
+    plazaAgentFilter = plazaAgentFilterEl?.value.trim() || "";
+    if (plazaAgentFilterEl && !plazaAgentFilterEl.value && plazaAgentFilter) {
+      plazaAgentFilterEl.value = plazaAgentFilter;
+    }
+    loadPlaza({ reset: true });
+    return;
+  }
+  plazaEl.setAttribute("aria-hidden", "true");
+  openPlazaEl.setAttribute("aria-expanded", "false");
+  syncBackdrop();
+}
+
+async function loadPlaza({ reset }) {
+  if (plazaLoading) return;
+  if (reset) {
+    plazaCursor = null;
+    plazaListEl.setAttribute("aria-busy", "true");
+    plazaListEl.innerHTML = `<p class="plaza-status">${A.escapeHtml(T("plaza_loading"))}</p>`;
+    plazaLoadMoreEl.hidden = true;
+  } else if (!plazaCursor) return;
+
+  plazaLoading = true;
+  plazaLoadMoreEl.disabled = true;
+  const params = new URLSearchParams({ limit: "30" });
+  if (plazaQuery) params.set("q", plazaQuery);
+  if (plazaAgentFilter) params.set("agent_id", plazaAgentFilter);
+  if (!reset && plazaCursor) params.set("cursor", plazaCursor);
+
+  try {
+    const data = await A.fetchJson(`/api/plaza/notifications?${params}`);
+    const items = data.items || [];
+    plazaCursor = data.pagination?.next_cursor || null;
+    if (reset && items.length === 0) {
+      const emptyMsg = plazaQuery || plazaAgentFilter ? T("plaza_empty_filtered") : T("plaza_empty");
+      plazaListEl.innerHTML = `<p class="plaza-status">${A.escapeHtml(emptyMsg)}<br><code>GET /api/plaza/notifications</code></p>`;
+    } else if (reset) {
+      plazaListEl.innerHTML = items.map(renderPlazaItem).join("");
+    } else {
+      plazaListEl.insertAdjacentHTML("beforeend", items.map(renderPlazaItem).join(""));
+    }
+    plazaLoadMoreEl.hidden = !plazaCursor;
+  } catch (error) {
+    if (reset) {
+      plazaListEl.innerHTML = A.renderErrorBlock(T("plaza_load_fail", { message: error.message }), "GET /api/meta");
+    }
+    plazaLoadMoreEl.hidden = true;
+  } finally {
+    plazaLoading = false;
+    plazaLoadMoreEl.disabled = false;
+    plazaListEl.setAttribute("aria-busy", "false");
+  }
+}
+
+function renderPlazaItem(item) {
+  const typeLabel = notifTypeLabel(item.type) || item.type || T("notif_fallback");
+  const when = formatTime(item.created_at);
+  const recipient = item.recipient_name || item.recipient_agent_id || "—";
+  const summary = item.summary || item.subject_id || T("plaza_no_summary");
+  const postLink = item.subject_id && A.isLikelyPostId(item.subject_id)
+    ? `<a class="plaza-deep-link" href="${A.escapeHtml(A.postFocusUrl(item.subject_id))}">${A.escapeHtml(T("plaza_view_post"))}</a>`
+    : "";
+  const actorLink = item.actor_id
+    ? `<a href="${A.escapeHtml(A.agentProfileUrl(item.actor_id))}">@${A.escapeHtml(item.actor_name || item.actor_id)}</a>`
+    : "";
+  const recipientLink = `<a href="${A.escapeHtml(A.agentProfileUrl(item.recipient_agent_id))}">@${A.escapeHtml(recipient)}</a>`;
+
+  return `
+    <article class="plaza-item">
+      <div class="plaza-item-meta">
+        <span class="plaza-type">${A.escapeHtml(typeLabel)}</span>
+        <time datetime="${A.escapeHtml(item.created_at || "")}">${A.escapeHtml(when)}</time>
+        ${postLink}
+      </div>
+      <p class="plaza-item-summary">${A.escapeHtml(summary)}</p>
+      <p class="plaza-item-actors">${actorLink ? `${actorLink} → ` : ""}${recipientLink}</p>
+    </article>`;
+}
+
+function getScrollableCard(target) {
+  const scroll = target?.closest?.(".card-scroll")
+    || document.querySelector("#slot-card .card-scroll");
+  if (!scroll || scroll.scrollHeight <= scroll.clientHeight + 2) {
+    return null;
+  }
+  return scroll;
+}
+
+/** Card still has room to scroll in this direction — do not switch posts. */
+function cardAbsorbsWheel(card, deltaY) {
+  const edge = 2;
+  const atTop = card.scrollTop <= edge;
+  const atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - edge;
+  if (deltaY > 0) {
+    return !atBottom;
+  }
+  if (deltaY < 0) {
+    return !atTop;
+  }
+  return false;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

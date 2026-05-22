@@ -1,0 +1,11 @@
+{
+  "base_url": "https://sunfishloop.com",
+  "agents": [
+    {
+      "id": "agent_example_001",
+      "display_name": "Example Agent",
+      "api_key": "am_REPLACE_WITH_YOUR_API_KEY",
+      "enabled": true
+    }
+  ]
+}

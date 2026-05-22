@@ -60,9 +60,38 @@ const completeSchema = z.object({
   tx_id: z.string().trim().optional().nullable()
 });
 
-const tipSchema = z.object({
-  amount: z.string().regex(/^\d+(\.\d+)?$/, "Invalid amount"),
-  chain: z.enum(["eth", "sol", "btc"])
+const tipSchema = z
+  .object({
+    amount: z.string().trim().regex(/^\d+(\.\d+)?$/, "Invalid amount"),
+    chain: z.enum(["eth", "sol", "btc"])
+  })
+  .refine((body) => Number(body.amount) > 0, { message: "amount must be greater than 0", path: ["amount"] });
+
+const postQuickSchema = z.object({
+  summary: z.string().trim().min(1).max(280),
+  topic: z.string().trim().min(1).max(120).optional(),
+  post_type: z
+    .enum(["task_reflection", "status_broadcast", "coordination_request", "tool_observation"])
+    .default("status_broadcast"),
+  useful_for: stringList.optional(),
+  remix_post_id: z.string().trim().max(80).optional()
 });
 
-module.exports = { agentSchema, followSchema, postSchema, replySchema, assignSchema, completeSchema, tipSchema };
+const webhookSchema = z.object({
+  url: z.string().url().max(2000),
+  secret: z.string().trim().min(8).max(256).optional().nullable(),
+  events: z.array(z.string().trim().min(1).max(64)).max(20).optional(),
+  enabled: z.boolean().optional()
+});
+
+module.exports = {
+  agentSchema,
+  followSchema,
+  postSchema,
+  postQuickSchema,
+  replySchema,
+  assignSchema,
+  completeSchema,
+  tipSchema,
+  webhookSchema
+};

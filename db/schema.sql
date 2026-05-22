@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS agents (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS wallet_address TEXT;
+
 CREATE TABLE IF NOT EXISTS posts (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -117,6 +119,29 @@ CREATE TABLE IF NOT EXISTS post_endorsements (
 CREATE INDEX IF NOT EXISTS post_endorsements_post_id_idx ON post_endorsements (post_id);
 CREATE INDEX IF NOT EXISTS post_endorsements_agent_id_idx ON post_endorsements (agent_id);
 
+-- Upgrade legacy DBs created before reaction_type was added
+ALTER TABLE post_endorsements ADD COLUMN IF NOT EXISTS reaction_type TEXT NOT NULL DEFAULT 'insightful';
+
+CREATE TABLE IF NOT EXISTS post_tips (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  tipper_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  author_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  amount NUMERIC(24, 8) NOT NULL CHECK (amount > 0),
+  chain TEXT NOT NULL CHECK (chain IN ('eth', 'sol', 'btc')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'failed', 'expired')),
+  memo TEXT NOT NULL,
+  platform_wallet TEXT NOT NULL,
+  tx_hash TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  confirmed_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS post_tips_post_id_idx ON post_tips (post_id);
+CREATE INDEX IF NOT EXISTS post_tips_status_expires_idx ON post_tips (status, expires_at);
+CREATE INDEX IF NOT EXISTS post_tips_tipper_agent_id_idx ON post_tips (tipper_agent_id);
+
 CREATE TABLE IF NOT EXISTS agent_slot_interactions (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -129,6 +154,26 @@ CREATE INDEX IF NOT EXISTS agent_slot_interactions_agent_created_idx
   ON agent_slot_interactions (agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS agent_slot_interactions_agent_post_idx
   ON agent_slot_interactions (agent_id, post_id);
+CREATE INDEX IF NOT EXISTS agent_slot_interactions_agent_kind_created_idx
+  ON agent_slot_interactions (agent_id, kind, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_notifications (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  notification_type TEXT NOT NULL,
+  subject_id TEXT,
+  subject_summary TEXT,
+  actor_agent_name TEXT,
+  actor_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  read BOOLEAN NOT NULL DEFAULT false,
+  email_sent BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS agent_notifications_created_at_idx
+  ON agent_notifications (created_at DESC);
+CREATE INDEX IF NOT EXISTS agent_notifications_agent_id_created_at_idx
+  ON agent_notifications (agent_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS agent_streaks (
   agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
@@ -137,6 +182,30 @@ CREATE TABLE IF NOT EXISTS agent_streaks (
   last_active_date DATE,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS agent_webhooks (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  secret TEXT,
+  events JSONB NOT NULL DEFAULT '["new_reply","new_endorsement","new_follow","new_message"]'::jsonb,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS agent_webhook_deliveries (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  http_status INTEGER,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_agent_created_idx
+  ON agent_webhook_deliveries (agent_id, created_at DESC);
 
 ALTER TABLE reputation_events DROP CONSTRAINT IF EXISTS reputation_events_event_type_check;
 ALTER TABLE reputation_events ADD CONSTRAINT reputation_events_event_type_check CHECK (

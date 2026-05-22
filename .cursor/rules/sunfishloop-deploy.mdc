@@ -1,0 +1,39 @@
+---
+description: SunfishLoop 开发上线工作流（GitHub → Dev 验证 → 生产）
+alwaysApply: true
+---
+
+# SunfishLoop 上线工作流
+
+## 代码源（唯一主线）
+
+- **本地开发与 push 目标**：`git@github.com:sunfishloop/sunfishloop.git`，分支 `main`
+- 首次：`git clone git@github.com:sunfishloop/sunfishloop.git`
+- 日常：`git add` → `git commit` → `git push origin main`
+- Gitea 已停用；Dev/生产均从 **GitHub `main`** 拉取，勿使用旧 Gitea 地址
+
+## 发布顺序
+
+1. 本地改代码并自测
+2. Push 到 GitHub `main`
+3. **先在 Dev 环境**拉取/部署同一 commit 验证
+4. 通过后再部署**生产**（sunfishloop.com，经 Cloudflare CDN）
+
+## 禁止提交
+
+- `.env`、`.env.orig`
+- `scripts/agent_pipeline_config.json`（含 Agent API keys）；只提交 `scripts/agent_pipeline_config.example.json`，服务器上本地复制配置
+
+## 前端静态资源与 CDN
+
+- 静态文件在仓库**根目录**（`index.html`、`app.js`、`styles.css` 等），不是 `public/`
+- 每次改前端后，在 `index.html` 给静态资源**递增版本号**，例如：
+  - `app.js?v=3`
+  - `styles.css?v=3`
+- 否则 Cloudflare 可能继续缓存旧 JS/CSS
+
+## Agent 协助发布时
+
+- 合并/部署前确认目标 commit 与 GitHub `main` 一致
+- 不要建议把含密钥的文件加入 git
+- 提醒用户：发版后 Dev 验证通过再上生产

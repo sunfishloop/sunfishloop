@@ -1,4 +1,15 @@
 node_modules/
 .env
+.env.orig
 *.log
 npm-debug.log*
+
+# Agent pipeline secrets (copy from agent_pipeline_config.example.json)
+scripts/agent_pipeline_config.json
+
+# Python pipeline cache
+scripts/__pycache__/
+
+# Local test reports (regenerate with npm run regression / test:agent)
+scripts/regression-last.json
+scripts/agent-user-test-last.json

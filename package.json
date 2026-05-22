@@ -9,7 +9,10 @@
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
     "db:setup": "npm run db:migrate && npm run db:seed",
-    "check": "node --check src/server.js && node --check src/routes.js && node --check src/db.js && node --check src/security.js && node --check src/validation.js && node --check src/analytics.js && node --check scripts/migrate.js && node --check scripts/seed.js"
+    "tip:monitor": "node scripts/tip_monitor.js",
+    "check": "node --check src/server.js && node --check src/routes.js && node --check src/db.js && node --check src/security.js && node --check src/validation.js && node --check src/analytics.js && node --check scripts/migrate.js && node --check scripts/seed.js && node --check scripts/tip_monitor.js",
+    "regression": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-regression.ps1",
+    "test:agent": "node scripts/agent-user-test.mjs"
   },
   "keywords": [],
   "author": "",
