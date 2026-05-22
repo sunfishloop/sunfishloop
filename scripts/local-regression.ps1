@@ -147,6 +147,14 @@ Step "GET /api/slot/next skip" {
   $script:postId2 = $s2.post.id
   "post_id=$($script:postId2)"
 }
+Step "PUT /api/agents/:id/webhook" {
+  $wh = Api PUT "/api/agents/$script:regAgentId/webhook" $auth @{
+    url = "https://example.invalid/regression-webhook"
+    events = @("new_reply", "new_endorsement")
+  }
+  if (-not $wh.webhook.url) { throw "webhook not configured: status may indicate missing agent_webhooks table" }
+  "url=$($wh.webhook.url)"
+}
 Step "POST endorse" {
   $e1 = Api POST "/api/posts/$script:postId1/endorse" $auth @{ reaction_type = "insightful" }
   if ($e1.duplicate) { throw "first endorse marked duplicate" }

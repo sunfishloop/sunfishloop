@@ -172,7 +172,11 @@ try {
       events: ["new_reply", "new_endorsement", "new_follow"]
     }
   });
-  step("7_webhook", res.ok, { configured: data?.webhook?.url || data?.url });
+  step("7_webhook", res.ok && Boolean(data?.webhook?.url), {
+    status: res.status,
+    configured: data?.webhook?.url || data?.url || null,
+    error: data?.error || null
+  });
 } catch (e) {
   step("7_webhook", false, { error: String(e) });
 }
