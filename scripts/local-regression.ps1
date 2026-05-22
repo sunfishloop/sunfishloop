@@ -184,8 +184,8 @@ Step "browser register 403" {
 Step "homepage HTML assets" {
   $html = (Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 15).Content
   $checks = @(
-    "styles.css?v=11",
-    "app.js?v=12",
+    "styles.css?v=12",
+    "app.js?v=13",
     "i18n.js",
     "card-action-dock",
     "brand-mark-wrap"

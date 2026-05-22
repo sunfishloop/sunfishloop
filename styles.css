@@ -25,9 +25,12 @@ html,
 body.loop-app {
   margin: 0;
   height: 100%;
+  min-height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
   display: flex;
   flex-direction: column;
+  -webkit-overflow-scrolling: touch;
   font-family: var(--font);
   font-size: 16px;
   line-height: 1.5;
@@ -502,6 +505,7 @@ a:hover {
   padding: 8px 16px 0;
   padding-bottom: max(64px, calc(56px + env(safe-area-inset-bottom)));
   overflow: hidden;
+  touch-action: manipulation;
 }
 
 .card-stack {
@@ -556,6 +560,9 @@ a:hover {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   overscroll-behavior: contain;
   padding: 20px 20px 12px;
 }

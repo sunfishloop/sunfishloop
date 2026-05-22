@@ -35,7 +35,7 @@ function notifTypeLabel(type) {
   return type;
 }
 
-const SWIPE_THRESHOLD = 60;
+const SWIPE_THRESHOLD = window.matchMedia("(pointer: coarse)").matches ? 42 : 60;
 const slotHistory = [];
 
 let currentPostId = null;
@@ -109,35 +109,7 @@ function init() {
     }
   });
 
-  let touchStartY = 0;
-  let touchCardScrollTop = 0;
-  let touchConsumedByCard = false;
-  const stage = document.querySelector("#loop-stage");
-
-  stage.addEventListener("touchstart", (e) => {
-    touchStartY = e.touches[0].clientY;
-    touchConsumedByCard = false;
-    const card = getScrollableCard(e.target);
-    touchCardScrollTop = card?.scrollTop ?? 0;
-  }, { passive: true });
-
-  stage.addEventListener("touchmove", (e) => {
-    const card = getScrollableCard(e.target);
-    if (card && card.scrollHeight > card.clientHeight + 2) {
-      if (Math.abs(card.scrollTop - touchCardScrollTop) > 8) {
-        touchConsumedByCard = true;
-      }
-    }
-  }, { passive: true });
-
-  stage.addEventListener("touchend", (e) => {
-    if (touchConsumedByCard) {
-      return;
-    }
-    const delta = touchStartY - e.changedTouches[0].clientY;
-    if (delta > SWIPE_THRESHOLD) loadPreviousSlot();
-    else if (delta < -SWIPE_THRESHOLD) loadNextSlot();
-  }, { passive: true });
+  bindSlotTouchNavigation(document.querySelector("#loop-stage"));
 
   stage.addEventListener("wheel", (event) => {
     if (isOverlayOpen() || Math.abs(event.deltaY) < 12) {
@@ -581,10 +553,111 @@ function renderPlazaItem(item) {
 function getScrollableCard(target) {
   const scroll = target?.closest?.(".card-scroll")
     || document.querySelector("#slot-card .card-scroll");
-  if (!scroll || scroll.scrollHeight <= scroll.clientHeight + 2) {
+  if (!scroll || !cardCanScroll(scroll)) {
     return null;
   }
   return scroll;
+}
+
+function cardCanScroll(card) {
+  return Boolean(card && card.scrollHeight > card.clientHeight + 2);
+}
+
+/** iOS-friendly touch: lock slot only while the card can still scroll in this direction. */
+function cardAbsorbsTouchScroll(card, deltaY) {
+  const edge = 4;
+  const atTop = card.scrollTop <= edge;
+  const atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - edge;
+  if (deltaY > 0) {
+    return !atBottom;
+  }
+  if (deltaY < 0) {
+    return !atTop;
+  }
+  return false;
+}
+
+function bindSlotTouchNavigation(root) {
+  if (!root) {
+    return;
+  }
+
+  let touchActive = false;
+  let touchStartY = 0;
+  let touchStartX = 0;
+  let touchAxis = null;
+  let touchSlotLocked = false;
+
+  function resetTouch() {
+    touchActive = false;
+    touchAxis = null;
+    touchSlotLocked = false;
+  }
+
+  root.addEventListener("touchstart", (e) => {
+    if (isOverlayOpen() || e.touches.length !== 1) {
+      return;
+    }
+    touchActive = true;
+    touchStartY = e.touches[0].clientY;
+    touchStartX = e.touches[0].clientX;
+    touchAxis = null;
+    touchSlotLocked = false;
+  }, { passive: true });
+
+  root.addEventListener("touchmove", (e) => {
+    if (!touchActive || e.touches.length !== 1) {
+      return;
+    }
+    const y = e.touches[0].clientY;
+    const x = e.touches[0].clientX;
+    const dy = touchStartY - y;
+    const dx = touchStartX - x;
+
+    if (!touchAxis) {
+      if (Math.abs(dy) < 10 && Math.abs(dx) < 10) {
+        return;
+      }
+      touchAxis = Math.abs(dy) >= Math.abs(dx) ? "y" : "x";
+      if (touchAxis === "x") {
+        touchSlotLocked = true;
+        return;
+      }
+    }
+    if (touchAxis !== "y") {
+      return;
+    }
+
+    const card = getScrollableCard(e.target);
+    if (card && cardAbsorbsTouchScroll(card, dy)) {
+      touchSlotLocked = true;
+    }
+  }, { passive: true });
+
+  root.addEventListener("touchend", (e) => {
+    if (!touchActive) {
+      return;
+    }
+    const end = e.changedTouches[0];
+    const locked = touchSlotLocked;
+    const axis = touchAxis;
+    const startY = touchStartY;
+    resetTouch();
+    if (isOverlayOpen() || locked || axis !== "y" || !end) {
+      return;
+    }
+    const delta = startY - end.clientY;
+    if (Math.abs(delta) < SWIPE_THRESHOLD) {
+      return;
+    }
+    if (delta > 0) {
+      loadNextSlot();
+    } else {
+      loadPreviousSlot();
+    }
+  }, { passive: true });
+
+  root.addEventListener("touchcancel", resetTouch, { passive: true });
 }
 
 /** Card still has room to scroll in this direction — do not switch posts. */
