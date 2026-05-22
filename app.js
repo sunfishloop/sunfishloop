@@ -185,10 +185,40 @@ function hideActionDock() {
   actionDockEl.hidden = true;
 }
 
+function slotPondHtml() {
+  return `
+      <div class="slot-pond" aria-hidden="true">
+        <div class="slot-pond-shine"></div>
+        <span class="slot-pond-ripple slot-pond-ripple--a"></span>
+        <span class="slot-pond-ripple slot-pond-ripple--b"></span>
+        <span class="slot-pond-bubble slot-pond-bubble--1"></span>
+        <span class="slot-pond-bubble slot-pond-bubble--2"></span>
+        <span class="slot-pond-bubble slot-pond-bubble--3"></span>
+        <span class="slot-pond-fish-wrap">
+          <img class="slot-pond-fish" src="/sunfishloop.png" width="52" height="52" alt="" decoding="async">
+        </span>
+      </div>`;
+}
+
+function showSlotLoading(messageKey = "card_loading_preview") {
+  hideActionDock();
+  slotCardEl.classList.remove("is-exit", "is-exit-back", "is-enter", "is-enter-back");
+  slotCardEl.setAttribute("aria-busy", "true");
+  slotCardEl.innerHTML = `
+    <div class="slot-loading" role="status" aria-live="polite">
+      ${slotPondHtml()}
+      <p class="slot-loading-text">${A.escapeHtml(T(messageKey))}</p>
+      <p class="slot-loading-hint">${A.escapeHtml(T("slot_loading_hint"))}</p>
+    </div>`;
+}
+
+function clearSlotLoadingState() {
+  slotCardEl.removeAttribute("aria-busy");
+}
+
 async function loadFocusedPost(postId) {
   loading = true;
-  hideActionDock();
-  slotCardEl.innerHTML = `<p class="card-loading">${A.escapeHtml(T("card_loading_post"))}</p>`;
+  showSlotLoading("card_loading_post");
   try {
     const data = await A.fetchJson(`/api/slot/next?focus_post_id=${encodeURIComponent(postId)}`);
     applySlotPayload(data);
@@ -208,6 +238,7 @@ async function loadFocusedPost(postId) {
     }
   } finally {
     loading = false;
+    clearSlotLoadingState();
     updatePrevButton();
   }
 }
@@ -232,21 +263,28 @@ async function loadNextSlot() {
   btnNextEl.disabled = true;
   btnPrevEl.disabled = true;
   const previousPost = currentPost;
+  const isFirstLoad = !currentPostId && !previousPost;
   const params = new URLSearchParams();
   if (A.getApiKey() && currentPostId) {
     params.set("skip", currentPostId);
   }
   const qs = params.toString() ? `?${params}` : "";
-  slotCardEl.classList.remove("is-exit-back", "is-enter-back");
-  slotCardEl.classList.add("is-exit");
 
   try {
-    await wait(280);
+    if (isFirstLoad) {
+      showSlotLoading("card_loading_preview");
+    } else {
+      slotCardEl.classList.remove("is-exit-back", "is-enter-back");
+      slotCardEl.classList.add("is-exit");
+      await wait(280);
+      showSlotLoading("card_loading_post");
+    }
     const payload = await A.fetchJson(`/api/slot/next${qs}`);
     if (previousPost) pushCurrentToHistory();
     applySlotPayload(payload, "forward");
   } catch (error) {
     slotCardEl.classList.remove("is-exit");
+    clearSlotLoadingState();
     hideActionDock();
     slotCardEl.innerHTML = A.renderErrorBlock(
       T("err_slot_fail", { message: error.detail || error.message }),
@@ -272,10 +310,13 @@ async function loadPreviousSlot() {
   slotCardEl.classList.add("is-exit-back");
   try {
     await wait(280);
+    showSlotLoading("card_loading_post");
+    await wait(120);
     currentSlotPayload = entry.payload;
     showPost(entry.post, "back");
   } finally {
     loading = false;
+    clearSlotLoadingState();
     btnNextEl.disabled = false;
     updatePrevButton();
   }
@@ -285,6 +326,7 @@ function applySlotPayload(payload, direction = "forward") {
   currentSlotPayload = payload;
   const post = A.normalizeSlotPost(payload.post);
   if (!post) {
+    clearSlotLoadingState();
     hideActionDock();
     slotCardEl.classList.remove("is-exit");
     slotCardEl.innerHTML = A.renderErrorBlock(
@@ -301,6 +343,7 @@ function applySlotPayload(payload, direction = "forward") {
 function showPost(post, direction) {
   currentPostId = post.id;
   currentPost = post;
+  clearSlotLoadingState();
   const parts = renderCardParts(post, currentSlotPayload);
   slotCardEl.innerHTML = parts.bodyHtml;
   if (actionDockEl) {
