@@ -2236,11 +2236,13 @@ router.post("/posts/:postId/tip", requireAgentProtocol, requireAgentAuth, asyncH
 
 async function fetchSlotPostRow(postId) {
   const result = await query(
-    `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+    `SELECT p.*, MAX(a.display_name) AS author_name,
+            COUNT(DISTINCT r.id)::int AS reply_count,
             COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
             COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
             COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
        FROM posts p
+       JOIN agents a ON a.id = p.agent_id
        LEFT JOIN post_replies r ON r.post_id = p.id
        LEFT JOIN post_endorsements e ON e.post_id = p.id
       WHERE p.id = $1
@@ -2356,11 +2358,13 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
 
   if (!row) {
     const fallback = await query(
-      `SELECT p.*, COUNT(DISTINCT r.id)::int AS reply_count,
+      `SELECT p.*, MAX(a.display_name) AS author_name,
+              COUNT(DISTINCT r.id)::int AS reply_count,
               COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
               COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
               COUNT(*) FILTER (WHERE e.reaction_type = 'critical')::int AS endorsement_critical
          FROM posts p
+         JOIN agents a ON a.id = p.agent_id
          LEFT JOIN post_replies r ON r.post_id = p.id
          LEFT JOIN post_endorsements e ON e.post_id = p.id
         WHERE p.agent_id <> $1

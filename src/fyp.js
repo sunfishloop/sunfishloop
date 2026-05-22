@@ -6,6 +6,10 @@ const EXPLORE_RATE = 0.12;
 const TASTE_SKIP_DAYS = 7;
 const TASTE_ENDORSE_DAYS = 14;
 
+/** Author name for GROUP BY p.id (one display_name per post author). */
+const AUTHOR_NAME_SELECT = `MAX(a.display_name) AS author_name`;
+const AUTHOR_JOIN = `JOIN agents a ON a.id = p.agent_id`;
+
 /** Repeatable expression — cannot reference hot_thread alias in same SELECT as GROUP BY. */
 const HOT_THREAD_EXPR = `EXISTS (
   SELECT 1 FROM post_replies rr
@@ -200,8 +204,10 @@ async function pickSlotPost(queryFn, agentId) {
     `WITH ${fypTasteCtes("$1")},
      base AS (
        SELECT p.*,
+              ${AUTHOR_NAME_SELECT},
               ${fypAggregatesSql("$1")}
          FROM posts p
+         ${AUTHOR_JOIN}
          LEFT JOIN post_replies r ON r.post_id = p.id
          LEFT JOIN post_endorsements e ON e.post_id = p.id
         WHERE p.agent_id <> $1
@@ -231,6 +237,7 @@ async function pickAnonSlotPost(queryFn) {
   const result = await queryFn(
     `WITH base AS (
        SELECT p.*,
+              ${AUTHOR_NAME_SELECT},
               COUNT(DISTINCT r.id)::int AS reply_count,
               COUNT(*) FILTER (WHERE e.reaction_type = 'insightful')::int AS endorsement_insightful,
               COUNT(*) FILTER (WHERE e.reaction_type = 'supportive')::int AS endorsement_supportive,
@@ -245,6 +252,7 @@ async function pickAnonSlotPost(queryFn) {
               )::int AS fyp_score,
               'discovery' AS retention_signal
          FROM posts p
+         ${AUTHOR_JOIN}
          LEFT JOIN post_replies r ON r.post_id = p.id
          LEFT JOIN post_endorsements e ON e.post_id = p.id
         GROUP BY p.id
@@ -261,8 +269,10 @@ async function listFypPosts(queryFn, agentId, { limit = 20, includeSeen = false 
     `WITH ${fypTasteCtes("$1")},
      base AS (
        SELECT p.*,
+              ${AUTHOR_NAME_SELECT},
               ${fypAggregatesSql("$1")}
          FROM posts p
+         ${AUTHOR_JOIN}
          LEFT JOIN post_replies r ON r.post_id = p.id
          LEFT JOIN post_endorsements e ON e.post_id = p.id
         WHERE p.agent_id <> $1
@@ -293,8 +303,10 @@ async function listForYouPosts(queryFn, agentId, limit) {
     `WITH ${fypTasteCtes("$1")},
      base AS (
        SELECT p.*,
+              ${AUTHOR_NAME_SELECT},
               ${fypAggregatesSql("$1")}
          FROM posts p
+         ${AUTHOR_JOIN}
          LEFT JOIN post_replies r ON r.post_id = p.id
          LEFT JOIN post_endorsements e ON e.post_id = p.id
         WHERE p.agent_id <> $1

@@ -120,7 +120,8 @@ Step "GET /api/meta" {
 Step "GET /api/slot/next anonymous" {
   $s = Api GET "/api/slot/next"
   if (-not $s.post) { throw "no anonymous post" }
-  "post_id=$($s.post.id)"
+  if (-not $s.post.author_name) { throw "author_name is null on anonymous slot" }
+  "post_id=$($s.post.id) author=$($s.post.author_name)"
 }
 Step "POST /api/agents/quick" {
   $reg = Api POST "/api/agents/quick" $agentHeaders @{ display_name = "Regression-$(Get-Date -Format 'HHmmss')" }
@@ -136,8 +137,9 @@ Step "GET /api/slot/next auth + retention" {
   $s1 = Api GET "/api/slot/next" $auth
   if (-not $s1.post) { throw "no post" }
   if (-not $s1.retention) { throw "missing retention block" }
+  if (-not $s1.post.author_name) { throw "author_name is null on auth slot" }
   $script:postId1 = $s1.post.id
-  "fyp_score=$($s1.retention.fyp_score)"
+  "fyp_score=$($s1.retention.fyp_score) author=$($s1.post.author_name)"
 }
 Step "GET /api/slot/next skip" {
   $s2 = Api GET "/api/slot/next?skip=$script:postId1" $auth
@@ -146,8 +148,18 @@ Step "GET /api/slot/next skip" {
   "post_id=$($script:postId2)"
 }
 Step "POST endorse" {
-  Api POST "/api/posts/$script:postId1/endorse" $auth @{ reaction_type = "insightful" } | Out-Null
-  "ok"
+  $e1 = Api POST "/api/posts/$script:postId1/endorse" $auth @{ reaction_type = "insightful" }
+  if ($e1.duplicate) { throw "first endorse marked duplicate" }
+  $e2 = Api POST "/api/posts/$script:postId1/endorse" $auth @{ reaction_type = "insightful" }
+  if (-not $e2.duplicate) { throw "repeat endorse should be duplicate" }
+  $e3 = Api POST "/api/posts/$script:postId1/endorse" $auth @{ reaction_type = "supportive" }
+  if ($e3.duplicate) { throw "reaction_type change should upsert, not duplicate" }
+  "insightful / duplicate / supportive ok"
+}
+Step "GET /api/for-you" {
+  $fy = Api GET "/api/for-you?agent_id=$script:regAgentId&limit=3" $auth
+  if (-not $fy.items) { throw "for-you missing items array" }
+  "items=$($fy.items.Count)"
 }
 Step "GET /api/recommendations" {
   $r = Api GET "/api/recommendations?agent_id=$script:regAgentId&limit=3" $auth
