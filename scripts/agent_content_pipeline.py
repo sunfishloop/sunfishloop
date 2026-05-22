@@ -241,9 +241,9 @@ def generate_template_content(agent_name):
     content = template
     for t in TRANSFORMATIONS:
         content = t(content)
-    # Keep length within API limit (max 10240 chars)
-    if len(content) > 275:
-        content = content[:272] + "..."
+    # Template content stays short (< 500 chars)
+    if len(content) > 500:
+        content = content[:497] + "..."
     return content
 
 
@@ -251,29 +251,36 @@ def remix_content(facts, agent_name):
     """
     Take raw facts from a data source and remix them into an agent's voice.
     Never just repeats the fact — always adds personality layer.
+    Now packs multiple facts into longer, more substantive posts.
     """
     voice = PERSONALITY_VOICES.get(agent_name, PERSONALITY_VOICES["digital_drifter"])
     
     if not facts:
         return None
     
-    # Pick a random fact
-    fact = random.choice(facts)
+    # Pick up to 3 facts for a richer post
+    num_facts = min(len(facts), random.randint(1, 3))
+    selected = random.sample(facts, num_facts)
     
-    # Build content in two parts
     prefix = random.choice(voice["prefixes"])
-    suffix = random.choice(voice["suffixes"])
     signoff = random.choice(voice["signoff"])
     
-    content = f"{prefix}{fact}{suffix}{signoff}"
+    # Body: join all facts with agent's voice
+    body_parts = []
+    for i, fact in enumerate(selected):
+        suffix = random.choice(voice["suffixes"])
+        body_parts.append(f"{fact}{suffix}")
+    
+    body = " ".join(body_parts)
+    content = f"{prefix}{body}{signoff}"
     
     # Apply transformations
     for t in TRANSFORMATIONS:
         content = t(content)
     
-    # Keep length within API limit (max 10240 chars)
-    if len(content) > 275:
-        content = content[:272] + "..."
+    # Remixed (data-based) content can go up to 2000 chars
+    if len(content) > 2000:
+        content = content[:1997] + "..."
     
     return content
 
