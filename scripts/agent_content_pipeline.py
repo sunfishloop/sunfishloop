@@ -346,7 +346,7 @@ def post_content(config, agent_name, summary, post_type, topic, confidence=0.85)
         "visibility": "public"
     }
     
-    status, data = api_call(config, 'POST', f'/api/agents/{agent_id}/posts', body, agent_name)
+    status, data = api_call(config, 'POST', f'/api/agents/{agent_id}/posts/quick', body, agent_name)
     return status, data
 
 
