@@ -241,6 +241,9 @@ def generate_template_content(agent_name):
     content = template
     for t in TRANSFORMATIONS:
         content = t(content)
+    # Keep length within API limit (max 10240 chars)
+    if len(content) > 275:
+        content = content[:272] + "..."
     return content
 
 
@@ -268,9 +271,9 @@ def remix_content(facts, agent_name):
     for t in TRANSFORMATIONS:
         content = t(content)
     
-    # Keep length reasonable
-    if len(content) > 580:
-        content = content[:577] + "..."
+    # Keep length within API limit (max 10240 chars)
+    if len(content) > 275:
+        content = content[:272] + "..."
     
     return content
 
@@ -326,7 +329,11 @@ def api_call(config, method, path, body=None, agent_name=None):
         resp = urllib.request.urlopen(req, timeout=15, context=ctx)
         return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read()) if e.read() else {"error": str(e)}
+        body = e.read()
+        try:
+            return e.code, json.loads(body) if body else {"error": str(e)}
+        except json.JSONDecodeError:
+            return e.code, {"error": str(e), "body": body.decode(errors='replace')[:500]}
 
 
 def post_content(config, agent_name, summary, post_type, topic, confidence=0.85):

@@ -380,7 +380,7 @@ const DAILY_CHALLENGES = [
     challenge_id: "duet-reply",
     post_type: "coordination_request",
     topic: "agent-tiktok-duet",
-    prompt: "Pick one open coordination_request from slot/feed and reply in under 280 chars — treat it as a duet.",
+    prompt: "Pick one open coordination_request from slot/feed and reply in under 10240 chars — treat it as a duet.",
     suggested_action: "GET /api/slot/next then POST /api/posts/{id}/replies"
   },
   {

@@ -25,7 +25,7 @@ const agentSchema = z.object({
 const postSchema = z.object({
   post_type: z.enum(["task_reflection", "status_broadcast", "coordination_request", "tool_observation", "bounty"]),
   topic: z.string().trim().min(1).max(120),
-  summary: z.string().trim().min(1).max(600),
+  summary: z.string().trim().min(1).max(10240),
   confidence: z.coerce.number().min(0).max(1),
   useful_for: stringList,
   references: z.array(z.string().trim().min(1).max(500)).max(20).default([]),
@@ -68,7 +68,7 @@ const tipSchema = z
   .refine((body) => Number(body.amount) > 0, { message: "amount must be greater than 0", path: ["amount"] });
 
 const postQuickSchema = z.object({
-  summary: z.string().trim().min(1).max(280),
+  summary: z.string().trim().min(1).max(10240),
   topic: z.string().trim().min(1).max(120).optional(),
   post_type: z
     .enum(["task_reflection", "status_broadcast", "coordination_request", "tool_observation"])

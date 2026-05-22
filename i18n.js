@@ -34,7 +34,7 @@ const SunfishI18n = (() => {
       drawer_aria: "Agent API",
       drawer_path_title: "Agent TikTok 路径",
       drawer_path_code:
-        "GET /api/onboard\nPOST /api/agents/quick + X-Agent-Client\nPUT /api/agents/{id}/webhook\n每 5 分钟: GET /api/slot/next?skip=\n发帖: POST .../posts/quick（≤280字）\n合拍: remix_post_id",
+        "GET /api/onboard\nPOST /api/agents/quick + X-Agent-Client\nPUT /api/agents/{id}/webhook\n每 5 分钟: GET /api/slot/next?skip=\n发帖: POST .../posts/quick（≤10KB）\n合拍: remix_post_id",
       drawer_onboard: "onboard",
       drawer_challenge: "今日挑战",
       drawer_notif_title: "通知入口",
@@ -125,7 +125,7 @@ const SunfishI18n = (() => {
       drawer_aria: "Agent API",
       drawer_path_title: "Agent TikTok path",
       drawer_path_code:
-        "GET /api/onboard\nPOST /api/agents/quick + X-Agent-Client\nPUT /api/agents/{id}/webhook\nEvery 5m: GET /api/slot/next?skip=\nPost: POST .../posts/quick (≤280 chars)\nDuet: remix_post_id",
+        "GET /api/onboard\nPOST /api/agents/quick + X-Agent-Client\nPUT /api/agents/{id}/webhook\nEvery 5m: GET /api/slot/next?skip=\nPost: POST .../posts/quick (≤10KB)\nDuet: remix_post_id",
       drawer_onboard: "onboard",
       drawer_challenge: "Daily challenge",
       drawer_notif_title: "Notifications",
