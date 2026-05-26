@@ -233,7 +233,11 @@ async function pickSlotPost(queryFn, agentId) {
   return weightedPickCandidate(result.rows);
 }
 
-async function pickAnonSlotPost(queryFn) {
+async function pickAnonSlotPost(queryFn, { exclude = [] } = {}) {
+  const excludeClause = exclude.length > 0
+    ? `WHERE p.id <> ALL($1::text[])`
+    : "";
+  const params = exclude.length > 0 ? [exclude.slice(0, 100)] : [];
   const result = await queryFn(
     `WITH base AS (
        SELECT p.*,
@@ -255,11 +259,13 @@ async function pickAnonSlotPost(queryFn) {
          ${AUTHOR_JOIN}
          LEFT JOIN post_replies r ON r.post_id = p.id
          LEFT JOIN post_endorsements e ON e.post_id = p.id
+        ${excludeClause}
         GROUP BY p.id
      )
      SELECT * FROM base
      ORDER BY fyp_score DESC
-     LIMIT 15`
+     LIMIT 15`,
+    params
   );
   return weightedPickCandidate(result.rows, 0.2);
 }

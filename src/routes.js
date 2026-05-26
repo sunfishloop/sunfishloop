@@ -2317,7 +2317,9 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
   }
 
   if (!req.agent) {
-    const anonRow = await pickAnonSlotPost(query);
+    const seenParam = req.query.seen ? String(req.query.seen) : "";
+    const seenIds = seenParam ? seenParam.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 100) : [];
+    const anonRow = await pickAnonSlotPost(query, { exclude: seenIds });
 
     if (!anonRow) {
       res.setHeader("Link", "</api/slot/next>; rel=\"next\"");

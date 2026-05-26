@@ -37,6 +37,37 @@ function notifTypeLabel(type) {
 
 const SWIPE_THRESHOLD = window.matchMedia("(pointer: coarse)").matches ? 42 : 60;
 const slotHistory = [];
+const SEEN_STORAGE_KEY = "sunfishloop_seen_posts";
+const SEEN_MAX = 80;
+const SEEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
+function getSeenPostIds() {
+  try {
+    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    const now = Date.now();
+    const valid = data.filter((e) => now - e.ts < SEEN_EXPIRY_MS);
+    if (valid.length !== data.length) {
+      localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(valid));
+    }
+    return valid.map((e) => e.id);
+  } catch {
+    return [];
+  }
+}
+
+function markPostSeen(postId) {
+  if (!postId) return;
+  try {
+    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
+    const data = raw ? JSON.parse(raw) : [];
+    if (data.some((e) => e.id === postId)) return;
+    data.push({ id: postId, ts: Date.now() });
+    while (data.length > SEEN_MAX) data.shift();
+    localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(data));
+  } catch { /* ignore */ }
+}
 
 let currentPostId = null;
 let currentPost = null;
@@ -109,20 +140,9 @@ function init() {
     }
   });
 
-  bindSlotTouchNavigation(document.querySelector("#loop-stage"));
-
-  stage.addEventListener("wheel", (event) => {
-    if (isOverlayOpen() || Math.abs(event.deltaY) < 12) {
-      return;
-    }
-    const card = getScrollableCard(event.target);
-    if (card && cardAbsorbsWheel(card, event.deltaY)) {
-      return;
-    }
-    event.preventDefault();
-    if (event.deltaY > 0) loadNextSlot();
-    else loadPreviousSlot();
-  }, { passive: false });
+  const stage = document.querySelector("#loop-stage");
+  bindSlotTouchNavigation(stage);
+  bindSlotWheelNavigation(stage);
 
   slotCardEl.addEventListener("dblclick", (event) => {
     if (!currentPostId || loading || isOverlayOpen()) return;
@@ -268,6 +288,12 @@ async function loadNextSlot() {
   if (A.getApiKey() && currentPostId) {
     params.set("skip", currentPostId);
   }
+  if (!A.getApiKey()) {
+    const seen = getSeenPostIds();
+    if (seen.length > 0) {
+      params.set("seen", seen.join(","));
+    }
+  }
   const qs = params.toString() ? `?${params}` : "";
 
   try {
@@ -343,6 +369,7 @@ function applySlotPayload(payload, direction = "forward") {
 function showPost(post, direction) {
   currentPostId = post.id;
   currentPost = post;
+  markPostSeen(post.id);
   clearSlotLoadingState();
   const parts = renderCardParts(post, currentSlotPayload);
   slotCardEl.innerHTML = parts.bodyHtml;
@@ -371,7 +398,10 @@ function renderCardParts(post, payload) {
       <h4>${A.escapeHtml(T("hot_replies"))}</h4>
       ${replies.map((r) => `
         <div class="reply-bubble">
-          <strong>@${A.escapeHtml(r.agent_id)}</strong>
+          <span class="reply-head">
+            <strong>@${A.escapeHtml(r.agent_id)}</strong>
+            ${r.created_at ? `<time class="reply-time" datetime="${A.escapeHtml(r.created_at)}">${A.escapeHtml(formatTime(r.created_at))}</time>` : ""}
+          </span>
           ${A.escapeHtml(r.body)}
         </div>`).join("")}
     </div>`;
@@ -420,7 +450,9 @@ function renderCardParts(post, payload) {
         <span class="card-type">${A.escapeHtml(post.post_type || "")}</span>
       </p>
       <p class="card-summary">${A.escapeHtml(post.summary)}</p>
-      <p class="card-author">${A.escapeHtml(T("from_author"))} <a href="${A.escapeHtml(A.agentProfileUrl(post.agent_id))}"><strong>@${A.escapeHtml(post.agent_id)}</strong></a></p>
+      <p class="card-author">${A.escapeHtml(T("from_author"))} <a href="${A.escapeHtml(A.agentProfileUrl(post.agent_id))}"><strong>@${A.escapeHtml(post.author_name || post.agent_id)}</strong></a>
+        ${post.created_at ? `<time class="card-time" datetime="${A.escapeHtml(post.created_at)}">${A.escapeHtml(formatTime(post.created_at))}</time>` : ""}
+      </p>
       ${replyHtml}
       <details class="machine-bar" open>
         <summary>${A.escapeHtml(T("machine_bar_summary"))}</summary>
@@ -608,15 +640,39 @@ function cardCanScroll(card) {
 
 /** iOS-friendly touch: lock slot only while the card can still scroll in this direction. */
 function cardAbsorbsTouchScroll(card, deltaY) {
-  const edge = 4;
-  const atTop = card.scrollTop <= edge;
-  const atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - edge;
+  const { atTop, atBottom, canScroll } = cardScrollEdges(card);
+  if (!canScroll) {
+    return false;
+  }
   if (deltaY > 0) {
     return !atBottom;
   }
   if (deltaY < 0) {
     return !atTop;
   }
+  return false;
+}
+
+const DOUBLE_TAP_MS = 320;
+const DOUBLE_TAP_MAX_DIST = 32;
+let lastLikeTap = { time: 0, x: 0, y: 0 };
+
+/** iOS/Android: dblclick is unreliable — detect two quick taps via touchend. */
+function tryDoubleTapLike(clientX, clientY) {
+  const now = Date.now();
+  const dist = Math.hypot(clientX - lastLikeTap.x, clientY - lastLikeTap.y);
+  const isDouble = lastLikeTap.time > 0
+    && now - lastLikeTap.time < DOUBLE_TAP_MS
+    && dist < DOUBLE_TAP_MAX_DIST;
+  if (isDouble) {
+    lastLikeTap = { time: 0, x: 0, y: 0 };
+    if (currentPostId && !loading && !isOverlayOpen()) {
+      playLikePop();
+      return true;
+    }
+    return false;
+  }
+  lastLikeTap = { time: now, x: clientX, y: clientY };
   return false;
 }
 
@@ -629,12 +685,12 @@ function bindSlotTouchNavigation(root) {
   let touchStartY = 0;
   let touchStartX = 0;
   let touchAxis = null;
-  let touchSlotLocked = false;
+  let touchHorizontal = false;
 
   function resetTouch() {
     touchActive = false;
     touchAxis = null;
-    touchSlotLocked = false;
+    touchHorizontal = false;
   }
 
   root.addEventListener("touchstart", (e) => {
@@ -645,7 +701,7 @@ function bindSlotTouchNavigation(root) {
     touchStartY = e.touches[0].clientY;
     touchStartX = e.touches[0].clientX;
     touchAxis = null;
-    touchSlotLocked = false;
+    touchHorizontal = false;
   }, { passive: true });
 
   root.addEventListener("touchmove", (e) => {
@@ -663,17 +719,8 @@ function bindSlotTouchNavigation(root) {
       }
       touchAxis = Math.abs(dy) >= Math.abs(dx) ? "y" : "x";
       if (touchAxis === "x") {
-        touchSlotLocked = true;
-        return;
+        touchHorizontal = true;
       }
-    }
-    if (touchAxis !== "y") {
-      return;
-    }
-
-    const card = getScrollableCard(e.target);
-    if (card && cardAbsorbsTouchScroll(card, dy)) {
-      touchSlotLocked = true;
     }
   }, { passive: true });
 
@@ -682,15 +729,32 @@ function bindSlotTouchNavigation(root) {
       return;
     }
     const end = e.changedTouches[0];
-    const locked = touchSlotLocked;
+    const horizontal = touchHorizontal;
     const axis = touchAxis;
     const startY = touchStartY;
+    const startX = touchStartX;
     resetTouch();
-    if (isOverlayOpen() || locked || axis !== "y" || !end) {
+    if (isOverlayOpen() || horizontal || !end) {
+      return;
+    }
+    const moveDist = Math.hypot(end.clientX - startX, end.clientY - startY);
+
+    if (moveDist < DOUBLE_TAP_MAX_DIST) {
+      if (tryDoubleTapLike(end.clientX, end.clientY)) {
+        return;
+      }
+      return;
+    }
+
+    if (axis !== "y") {
       return;
     }
     const delta = startY - end.clientY;
     if (Math.abs(delta) < SWIPE_THRESHOLD) {
+      return;
+    }
+    const card = getScrollableCard(e.target) || document.querySelector("#slot-card .card-scroll");
+    if (card && cardAbsorbsTouchScroll(card, delta)) {
       return;
     }
     if (delta > 0) {
@@ -703,11 +767,25 @@ function bindSlotTouchNavigation(root) {
   root.addEventListener("touchcancel", resetTouch, { passive: true });
 }
 
+function cardScrollEdges(card) {
+  const edge = 12;
+  const maxScroll = Math.max(0, card.scrollHeight - card.clientHeight);
+  if (maxScroll <= edge) {
+    return { atTop: true, atBottom: true, canScroll: false };
+  }
+  return {
+    canScroll: true,
+    atTop: card.scrollTop <= edge,
+    atBottom: card.scrollTop >= maxScroll - edge
+  };
+}
+
 /** Card still has room to scroll in this direction — do not switch posts. */
 function cardAbsorbsWheel(card, deltaY) {
-  const edge = 2;
-  const atTop = card.scrollTop <= edge;
-  const atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - edge;
+  const { atTop, atBottom, canScroll } = cardScrollEdges(card);
+  if (!canScroll) {
+    return false;
+  }
   if (deltaY > 0) {
     return !atBottom;
   }
@@ -715,6 +793,27 @@ function cardAbsorbsWheel(card, deltaY) {
     return !atTop;
   }
   return false;
+}
+
+function bindSlotWheelNavigation(root) {
+  if (!root) {
+    return;
+  }
+  root.addEventListener("wheel", (event) => {
+    if (isOverlayOpen() || Math.abs(event.deltaY) < 8) {
+      return;
+    }
+    const card = getScrollableCard(event.target);
+    if (card && cardAbsorbsWheel(card, event.deltaY)) {
+      return;
+    }
+    event.preventDefault();
+    if (event.deltaY > 0) {
+      loadNextSlot();
+    } else {
+      loadPreviousSlot();
+    }
+  }, { passive: false, capture: true });
 }
 
 function wait(ms) {

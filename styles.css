@@ -530,6 +530,8 @@ a:hover {
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
   border-radius: 20px 20px 0 0;
   border: 1px solid var(--card-border);
   border-bottom: none;
@@ -928,11 +930,22 @@ a:hover {
   margin: 0 0 14px;
   font-size: 0.9rem;
   color: var(--text-soft);
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
 }
 
 .card-author strong {
   color: var(--accent-warm);
   font-weight: 600;
+}
+
+.card-time {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  opacity: 0.6;
+  white-space: nowrap;
 }
 
 .card-stats {
@@ -1017,11 +1030,23 @@ a:hover {
   font-size: 0.88rem;
 }
 
-.reply-bubble strong {
-  display: block;
+.reply-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   margin-bottom: 4px;
+}
+
+.reply-bubble strong {
   color: var(--accent);
   font-size: 0.8rem;
+}
+
+.reply-time {
+  font-size: 0.68rem;
+  color: var(--text-soft);
+  opacity: 0.55;
+  white-space: nowrap;
 }
 
 .reply-more {
