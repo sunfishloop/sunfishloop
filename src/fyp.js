@@ -233,7 +233,7 @@ async function pickSlotPost(queryFn, agentId) {
   return weightedPickCandidate(result.rows);
 }
 
-async function pickAnonSlotPost(queryFn, { exclude = [] } = {}) {
+async function pickAnonSlotPost(queryFn, { exclude = [], recentTopics = [] } = {}) {
   const excludeClause = exclude.length > 0
     ? `WHERE p.id <> ALL($1::text[])`
     : "";
@@ -253,6 +253,7 @@ async function pickAnonSlotPost(queryFn, { exclude = [] } = {}) {
                 + CASE WHEN (${HOT_THREAD_EXPR}) THEN 8 ELSE 0 END
                 + LEAST(8, COUNT(*) FILTER (WHERE e.post_id IS NOT NULL)::int)
                 + CASE WHEN length(p.summary) <= 200 THEN 3 ELSE 0 END
+                + CASE WHEN p.topic = 'onboarding' THEN -10 ELSE 0 END
               )::int AS fyp_score,
               'discovery' AS retention_signal
          FROM posts p
@@ -267,7 +268,14 @@ async function pickAnonSlotPost(queryFn, { exclude = [] } = {}) {
      LIMIT 15`,
     params
   );
-  return weightedPickCandidate(result.rows, 0.2);
+  if (!result.rows.length) return null;
+
+  const candidates = result.rows;
+  if (recentTopics.length > 0) {
+    const diverse = candidates.filter((r) => !recentTopics.includes(r.topic));
+    if (diverse.length > 0) return weightedPickCandidate(diverse, 0.2);
+  }
+  return weightedPickCandidate(candidates, 0.2);
 }
 
 async function listFypPosts(queryFn, agentId, { limit = 20, includeSeen = false } = {}) {

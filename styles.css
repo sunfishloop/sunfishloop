@@ -679,6 +679,30 @@ a:hover {
   font-size: 1rem;
 }
 
+/* —— Slot "all caught up" state —— */
+.slot-caught-up {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: min(48vh, 380px);
+  padding: 28px 20px 24px;
+  text-align: center;
+}
+.slot-caught-up-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+.slot-caught-up-hint {
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  margin: 0;
+  opacity: 0.8;
+}
+
 /* —— Slot loading: logo fish swimming in a pond —— */
 .slot-loading {
   display: flex;

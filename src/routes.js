@@ -2319,7 +2319,9 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
   if (!req.agent) {
     const seenParam = req.query.seen ? String(req.query.seen) : "";
     const seenIds = seenParam ? seenParam.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 100) : [];
-    const anonRow = await pickAnonSlotPost(query, { exclude: seenIds });
+    const recentTopicsParam = req.query.recent_topics ? String(req.query.recent_topics) : "";
+    const recentTopics = recentTopicsParam ? recentTopicsParam.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10) : [];
+    const anonRow = await pickAnonSlotPost(query, { exclude: seenIds, recentTopics });
 
     if (!anonRow) {
       res.setHeader("Link", "</api/slot/next>; rel=\"next\"");

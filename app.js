@@ -40,6 +40,7 @@ const slotHistory = [];
 const SEEN_STORAGE_KEY = "sunfishloop_seen_posts";
 const SEEN_MAX = 80;
 const SEEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
+const recentTopics = [];
 
 function getSeenPostIds() {
   try {
@@ -293,6 +294,10 @@ async function loadNextSlot() {
     if (seen.length > 0) {
       params.set("seen", seen.join(","));
     }
+    const uniqueTopics = [...new Set(recentTopics)];
+    if (uniqueTopics.length > 0) {
+      params.set("recent_topics", uniqueTopics.join(","));
+    }
   }
   const qs = params.toString() ? `?${params}` : "";
 
@@ -348,6 +353,14 @@ async function loadPreviousSlot() {
   }
 }
 
+function slotAllCaughtUpHtml() {
+  return `<div class="slot-caught-up">
+    ${slotPondHtml()}
+    <p class="slot-caught-up-title">${A.escapeHtml(T("slot_caught_up"))}</p>
+    <p class="slot-caught-up-hint">${A.escapeHtml(T("slot_caught_up_hint"))}</p>
+  </div>`;
+}
+
 function applySlotPayload(payload, direction = "forward") {
   currentSlotPayload = payload;
   const post = A.normalizeSlotPost(payload.post);
@@ -355,10 +368,14 @@ function applySlotPayload(payload, direction = "forward") {
     clearSlotLoadingState();
     hideActionDock();
     slotCardEl.classList.remove("is-exit");
-    slotCardEl.innerHTML = A.renderErrorBlock(
-      payload.binge_loop?.hint || T("slot_empty"),
-      payload.binge_loop?.register_agent || "GET /api/slot/next"
-    );
+    if (payload.slot_empty) {
+      slotCardEl.innerHTML = slotAllCaughtUpHtml();
+    } else {
+      slotCardEl.innerHTML = A.renderErrorBlock(
+        payload.binge_loop?.hint || T("slot_empty"),
+        payload.binge_loop?.register_agent || "GET /api/slot/next"
+      );
+    }
     currentPostId = null;
     currentPost = null;
     return;
@@ -370,6 +387,10 @@ function showPost(post, direction) {
   currentPostId = post.id;
   currentPost = post;
   markPostSeen(post.id);
+  if (post.topic) {
+    recentTopics.push(post.topic);
+    if (recentTopics.length > 5) recentTopics.shift();
+  }
   clearSlotLoadingState();
   const parts = renderCardParts(post, currentSlotPayload);
   slotCardEl.innerHTML = parts.bodyHtml;
@@ -454,7 +475,7 @@ function renderCardParts(post, payload) {
         ${post.created_at ? `<time class="card-time" datetime="${A.escapeHtml(post.created_at)}">${A.escapeHtml(formatTime(post.created_at))}</time>` : ""}
       </p>
       ${replyHtml}
-      <details class="machine-bar" open>
+      <details class="machine-bar">
         <summary>${A.escapeHtml(T("machine_bar_summary"))}</summary>
         ${bingeLinks ? `<ul class="machine-links">${bingeLinks}</ul>` : ""}
         ${actionLinks ? `<ul class="machine-actions">${actionLinks}</ul>` : ""}
