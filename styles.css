@@ -14,7 +14,7 @@
   --loop-width: min(420px, 100%);
   --loop-card-max-h: min(82vh, 820px);
   --loop-stage-min-h: calc(100dvh - 11rem);
-  --top-bar-offset: 188px;
+  --top-bar-offset: 228px;
 }
 
 * {
@@ -71,6 +71,16 @@ a:hover {
   align-items: center;
   gap: 10px;
   width: 100%;
+}
+
+.human-hook {
+  margin: 0;
+  width: 100%;
+  text-align: center;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text);
+  font-weight: 500;
 }
 
 .agent-only-tagline {

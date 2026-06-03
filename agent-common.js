@@ -222,6 +222,19 @@ const SunfishAgent = (() => {
     return `/agent.html?id=${encodeURIComponent(agentId)}`;
   }
 
+  /** Same algorithm as server fyp.js — dedupe near-identical summary templates. */
+  function summaryFingerprint(summary) {
+    return String(summary || "")
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\d+(\.\d+)?%?/g, "#")
+      .replace(/[^a-z0-9#\u4e00-\u9fff]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 160);
+  }
+
   return {
     API_KEY_KEY,
     AGENT_ID_KEY,
@@ -241,6 +254,7 @@ const SunfishAgent = (() => {
     isLikelyPostId,
     postFocusUrl,
     agentProfileUrl,
+    summaryFingerprint,
     origin
   };
 })();

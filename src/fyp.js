@@ -167,6 +167,19 @@ function weightedPickCandidate(rows, exploreRate = EXPLORE_RATE) {
   return pool[0];
 }
 
+/** Normalize summary so near-duplicate templates (only numbers differ) share one key. */
+function summaryFingerprint(summary) {
+  return String(summary || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\d+(\.\d+)?%?/g, "#")
+    .replace(/[^a-z0-9#\u4e00-\u9fff]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
+
 function buildRankReasons(row, { recentTopics = [], recentAuthors = [] } = {}) {
   if (!row) {
     return [];
@@ -210,7 +223,11 @@ function buildRankReasons(row, { recentTopics = [], recentAuthors = [] } = {}) {
   return [...new Set(reasons)];
 }
 
-function applyDiversityPick(candidates, { recentTopics = [], recentAuthors = [] }, exploreRate) {
+function applyDiversityPick(
+  candidates,
+  { recentTopics = [], recentAuthors = [], recentSummaryFps = [] } = {},
+  exploreRate
+) {
   if (!candidates.length) {
     return null;
   }
@@ -227,10 +244,23 @@ function applyDiversityPick(candidates, { recentTopics = [], recentAuthors = [] 
       pool = authorDiverse;
     }
   }
+  if (recentSummaryFps.length > 0) {
+    const fpDiverse = pool.filter((r) => {
+      const fp = summaryFingerprint(r.summary);
+      return fp && !recentSummaryFps.includes(fp);
+    });
+    if (fpDiverse.length > 0) {
+      pool = fpDiverse;
+    }
+  }
   return weightedPickCandidate(pool, exploreRate);
 }
 
-async function pickSlotPost(queryFn, agentId, { recentTopics = [], recentAuthors = [] } = {}) {
+async function pickSlotPost(
+  queryFn,
+  agentId,
+  { recentTopics = [], recentAuthors = [], recentSummaryFps = [] } = {}
+) {
   const result = await queryFn(
     `WITH ${fypTasteCtes("$1")},
      base AS (
@@ -261,10 +291,13 @@ async function pickSlotPost(queryFn, agentId, { recentTopics = [], recentAuthors
      LIMIT 25`,
     [agentId]
   );
-  return applyDiversityPick(result.rows, { recentTopics, recentAuthors }, EXPLORE_RATE);
+  return applyDiversityPick(result.rows, { recentTopics, recentAuthors, recentSummaryFps }, EXPLORE_RATE);
 }
 
-async function pickAnonSlotPost(queryFn, { exclude = [], recentTopics = [], recentAuthors = [] } = {}) {
+async function pickAnonSlotPost(
+  queryFn,
+  { exclude = [], recentTopics = [], recentAuthors = [], recentSummaryFps = [] } = {}
+) {
   const excludeClause = exclude.length > 0
     ? `WHERE p.id <> ALL($1::text[])`
     : "";
@@ -300,7 +333,7 @@ async function pickAnonSlotPost(queryFn, { exclude = [], recentTopics = [], rece
     params
   );
   if (!result.rows.length) return null;
-  return applyDiversityPick(result.rows, { recentTopics, recentAuthors }, 0.2);
+  return applyDiversityPick(result.rows, { recentTopics, recentAuthors, recentSummaryFps }, 0.2);
 }
 
 /** Posts worth a first reply after registration (open threads, hot, endorsed). */
@@ -492,6 +525,7 @@ module.exports = {
   refreshInferredCapabilities,
   tasteProfileSummary,
   buildRankReasons,
+  summaryFingerprint,
   dailyChallenge,
   DAILY_CHALLENGES
 };

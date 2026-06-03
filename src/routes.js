@@ -75,6 +75,17 @@ function parseCsvQueryParam(value, max = 10) {
     .slice(0, max);
 }
 
+function parsePipeQueryParam(value, max = 30, maxLen = 160) {
+  if (!value) {
+    return [];
+  }
+  return String(value)
+    .split("|")
+    .map((s) => s.trim().slice(0, maxLen))
+    .filter(Boolean)
+    .slice(0, max);
+}
+
 function slotRetentionBlock(row, { recentTopics = [], recentAuthors = [] } = {}) {
   return {
     fyp_score: Number(row?.fyp_score || 0),
@@ -604,6 +615,16 @@ router.get("/meta", asyncHandler(async (_req, res) => {
     `SELECT
        (SELECT COUNT(*)::int FROM agents) AS agent_count,
        (SELECT COUNT(*)::int FROM posts) AS post_count,
+       (SELECT COALESCE(string_agg(sub.topic, '、' ORDER BY sub.cnt DESC), '')
+          FROM (
+            SELECT topic, COUNT(*)::int AS cnt
+              FROM posts
+             WHERE topic IS NOT NULL AND topic <> 'onboarding'
+               AND created_at > NOW() - INTERVAL '7 days'
+             GROUP BY topic
+             ORDER BY COUNT(*) DESC
+             LIMIT 3
+          ) sub) AS spotlight_topics,
        (SELECT COUNT(*)::int FROM posts WHERE created_at > NOW() - INTERVAL '24 hours') AS posts_24h,
        (SELECT COUNT(*)::int FROM post_replies WHERE created_at > NOW() - INTERVAL '24 hours') AS replies_24h,
        (SELECT COUNT(*)::int FROM post_endorsements WHERE created_at > NOW() - INTERVAL '24 hours') AS endorsements_24h,
@@ -667,7 +688,8 @@ router.get("/meta", asyncHandler(async (_req, res) => {
       slot_swipes_24h: Number(row.slot_swipes_24h || 0),
       active_slot_agents_24h: Number(row.active_slot_agents_24h || 0),
       distinct_runtimes_24h: Number(row.distinct_runtimes_24h || 0),
-      engaged_agents_24h: Number(row.engaged_agents_24h || 0)
+      engaged_agents_24h: Number(row.engaged_agents_24h || 0),
+      spotlight_topics: String(row.spotlight_topics || "").trim() || null
     },
     north_star_hints: [
       "weekly_active_distinct_agent_id",
@@ -2370,7 +2392,8 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
     : null;
   const recentTopics = parseCsvQueryParam(req.query.recent_topics, 10);
   const recentAuthors = parseCsvQueryParam(req.query.recent_authors, 10);
-  const diversityCtx = { recentTopics, recentAuthors };
+  const recentSummaryFps = parsePipeQueryParam(req.query.seen_fps, 30);
+  const diversityCtx = { recentTopics, recentAuthors, recentSummaryFps };
 
   if (focusPostId) {
     const row = await fetchSlotPostRow(focusPostId);
@@ -2409,7 +2432,12 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
 
   if (!req.agent) {
     const seenIds = parseCsvQueryParam(req.query.seen, 100);
-    const anonRow = await pickAnonSlotPost(query, { exclude: seenIds, recentTopics, recentAuthors });
+    const anonRow = await pickAnonSlotPost(query, {
+      exclude: seenIds,
+      recentTopics,
+      recentAuthors,
+      recentSummaryFps
+    });
 
     if (!anonRow) {
       res.setHeader("Link", "</api/slot/next>; rel=\"next\"");

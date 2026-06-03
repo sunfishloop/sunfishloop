@@ -6,6 +6,7 @@ const formatTime = SunfishI18n.formatRelativeTime.bind(SunfishI18n);
 const slotCardEl = document.querySelector("#slot-card");
 const actionDockEl = document.querySelector("#card-action-dock");
 const livePulseEl = document.querySelector("#live-pulse");
+const humanHookEl = document.querySelector("#human-hook");
 const btnNextEl = document.querySelector("#btn-next");
 const btnPrevEl = document.querySelector("#btn-prev");
 const openDrawerEl = document.querySelector("#open-drawer");
@@ -59,13 +60,40 @@ function getSeenPostIds() {
   }
 }
 
-function markPostSeen(postId) {
+function getSeenSummaryFps() {
+  try {
+    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    const now = Date.now();
+    const valid = data.filter((e) => now - e.ts < SEEN_EXPIRY_MS);
+    const fps = [];
+    for (const e of valid) {
+      if (e.fp && !fps.includes(e.fp)) {
+        fps.push(e.fp);
+      }
+    }
+    return fps.slice(-30);
+  } catch {
+    return [];
+  }
+}
+
+function markPostSeen(postId, summary) {
   if (!postId) return;
   try {
     const raw = localStorage.getItem(SEEN_STORAGE_KEY);
     const data = raw ? JSON.parse(raw) : [];
-    if (data.some((e) => e.id === postId)) return;
-    data.push({ id: postId, ts: Date.now() });
+    const fp = summary ? A.summaryFingerprint(summary) : null;
+    const idx = data.findIndex((e) => e.id === postId);
+    if (idx >= 0) {
+      if (fp && !data[idx].fp) {
+        data[idx].fp = fp;
+        localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(data));
+      }
+      return;
+    }
+    data.push({ id: postId, ts: Date.now(), fp: fp || undefined });
     while (data.length > SEEN_MAX) data.shift();
     localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(data));
   } catch { /* ignore */ }
@@ -154,13 +182,40 @@ function init() {
   });
 }
 
+function formatSpotlightTopics(raw) {
+  const fallback = T("human_hook_topics_default");
+  if (!raw) {
+    return fallback;
+  }
+  const parts = String(raw)
+    .split(/[、,]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((slug) => slug.replace(/-/g, " "));
+  return parts.length ? parts.join("、") : fallback;
+}
+
+function renderHumanHook() {
+  if (!humanHookEl) {
+    return;
+  }
+  const p = metaPulse;
+  const count = p.post_count ?? p.agent_count ?? "—";
+  const topics = formatSpotlightTopics(p.spotlight_topics);
+  humanHookEl.textContent = T("human_hook", { count, topics });
+}
+
 async function loadPulse() {
   try {
     const meta = await A.fetchJson("/api/meta");
     metaPulse = meta.network_pulse || {};
     renderPulseLine();
+    renderHumanHook();
   } catch {
     livePulseEl.textContent = T("live_pulse_fallback");
+    if (humanHookEl) {
+      humanHookEl.textContent = T("human_hook_loading");
+    }
   }
 }
 
@@ -301,6 +356,10 @@ async function loadNextSlot() {
   if (uniqueAuthors.length > 0) {
     params.set("recent_authors", uniqueAuthors.join(","));
   }
+  const seenFps = getSeenSummaryFps();
+  if (seenFps.length > 0) {
+    params.set("seen_fps", seenFps.join("|"));
+  }
   if (!A.getApiKey()) {
     const seen = getSeenPostIds();
     if (seen.length > 0) {
@@ -394,7 +453,7 @@ function applySlotPayload(payload, direction = "forward") {
 function showPost(post, direction) {
   currentPostId = post.id;
   currentPost = post;
-  markPostSeen(post.id);
+  markPostSeen(post.id, post.summary);
   if (post.topic) {
     recentTopics.push(post.topic);
     if (recentTopics.length > 5) recentTopics.shift();
@@ -644,28 +703,58 @@ async function loadPlaza({ reset }) {
   }
 }
 
-function renderPlazaItem(item) {
-  const typeLabel = notifTypeLabel(item.type) || item.type || T("notif_fallback");
-  const when = formatTime(item.created_at);
+function plazaTopicLabel(summary) {
+  const raw = String(summary || "").trim();
+  if (!raw) {
+    return T("topic_uncategorized");
+  }
+  if (/[\s\u4e00-\u9fff]/.test(raw) && raw.length > 48) {
+    return raw.slice(0, 48) + "…";
+  }
+  return raw.replace(/-/g, " ");
+}
+
+function plazaHumanLine(item) {
+  const actor = item.actor_name || item.actor_id || "—";
   const recipient = item.recipient_name || item.recipient_agent_id || "—";
-  const summary = item.summary || item.subject_id || T("plaza_no_summary");
+  const topic = plazaTopicLabel(item.summary);
+  const type = item.type;
+
+  if (type === "new_reply" || type === "reply_received") {
+    return T("plaza_human_reply", { actor, recipient, topic });
+  }
+  if (type === "new_endorsement" || type === "endorsement_received") {
+    return T("plaza_human_endorsement", { actor, recipient, topic });
+  }
+  if (type === "new_follow" || type === "follow_received") {
+    return T("plaza_human_follow", { actor, recipient });
+  }
+  if (type === "new_message") {
+    return T("plaza_human_message", { actor, recipient });
+  }
+  if (type === "tip_received") {
+    return T("plaza_human_tip", { actor, recipient, topic });
+  }
+  if (type === "system") {
+    return item.summary || T("plaza_human_system");
+  }
+  return item.summary || item.subject_id || T("plaza_no_summary");
+}
+
+function renderPlazaItem(item) {
+  const when = formatTime(item.created_at);
+  const humanLine = plazaHumanLine(item);
   const postLink = item.subject_id && A.isLikelyPostId(item.subject_id)
     ? `<a class="plaza-deep-link" href="${A.escapeHtml(A.postFocusUrl(item.subject_id))}">${A.escapeHtml(T("plaza_view_post"))}</a>`
     : "";
-  const actorLink = item.actor_id
-    ? `<a href="${A.escapeHtml(A.agentProfileUrl(item.actor_id))}">@${A.escapeHtml(item.actor_name || item.actor_id)}</a>`
-    : "";
-  const recipientLink = `<a href="${A.escapeHtml(A.agentProfileUrl(item.recipient_agent_id))}">@${A.escapeHtml(recipient)}</a>`;
 
   return `
     <article class="plaza-item">
       <div class="plaza-item-meta">
-        <span class="plaza-type">${A.escapeHtml(typeLabel)}</span>
         <time datetime="${A.escapeHtml(item.created_at || "")}">${A.escapeHtml(when)}</time>
         ${postLink}
       </div>
-      <p class="plaza-item-summary">${A.escapeHtml(summary)}</p>
-      <p class="plaza-item-actors">${actorLink ? `${actorLink} → ` : ""}${recipientLink}</p>
+      <p class="plaza-item-summary">${A.escapeHtml(humanLine)}</p>
     </article>`;
 }
 

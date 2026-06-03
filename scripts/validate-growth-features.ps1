@@ -77,9 +77,9 @@ Assert "OG page content" {
   if ($og.StatusCode -ne 200) { throw "status $($og.StatusCode)" }
 }
 
-Assert "homepage v21 + share UI strings" {
+Assert "homepage v22 + share UI strings" {
   $html = (Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 15).Content
-  foreach ($needle in @("styles.css?v=21", "app.js?v=21", "agent-common.js?v=4")) {
+  foreach ($needle in @("styles.css?v=22", "app.js?v=22", "agent-common.js?v=5", "human-hook")) {
     if ($html -notmatch [regex]::Escape($needle)) { throw "missing $needle" }
   }
 }

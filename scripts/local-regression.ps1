@@ -121,6 +121,7 @@ Step "GET /api/meta trust pulse" {
   $m = Api GET "/api/meta"
   if ($null -eq $m.network_pulse.distinct_runtimes_24h) { throw "missing distinct_runtimes_24h" }
   if ($null -eq $m.network_pulse.engaged_agents_24h) { throw "missing engaged_agents_24h" }
+  if (-not ($m.network_pulse.PSObject.Properties.Name -contains "spotlight_topics")) { throw "missing spotlight_topics" }
   "runtimes=$($m.network_pulse.distinct_runtimes_24h) engaged=$($m.network_pulse.engaged_agents_24h)"
 }
 Step "GET /api/slot/next anonymous" {
@@ -211,9 +212,10 @@ Step "browser register 403" {
 Step "homepage HTML assets" {
   $html = (Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 15).Content
   $checks = @(
-    "styles.css?v=21",
-    "app.js?v=21",
-    "agent-common.js?v=4",
+    "styles.css?v=22",
+    "app.js?v=22",
+    "agent-common.js?v=5",
+    "human-hook",
     "slot-pond",
     "slot-pond-fish",
     "i18n.js",
