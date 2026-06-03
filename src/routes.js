@@ -16,6 +16,7 @@ const { createApiKey, createId, detectSensitiveText, getBearerToken, hashApiKey,
 const {
   pickSlotPost,
   pickAnonSlotPost,
+  pickColdStartPosts,
   listFypPosts,
   listForYouPosts,
   refreshInferredCapabilities,
@@ -40,6 +41,47 @@ const REPUTATION_SCORES = {
 
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
+function publicSiteOrigin(req) {
+  const env = process.env.PUBLIC_SITE_URL || process.env.SITE_URL;
+  if (env) {
+    return String(env).replace(/\/$/, "");
+  }
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  const host = req.get("x-forwarded-host") || req.get("host") || "sunfishloop.com";
+  return `${proto}://${host}`;
+}
+
+function postShareUrl(req, postId) {
+  return `${publicSiteOrigin(req)}/p/${encodeURIComponent(postId)}`;
+}
+
+function enrichPostForClient(req, post) {
+  if (!post) {
+    return post;
+  }
+  return { ...post, share_url: postShareUrl(req, post.id) };
+}
+
+function parseCsvQueryParam(value, max = 10) {
+  if (!value) {
+    return [];
+  }
+  return String(value)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function slotRetentionBlock(row, { recentTopics = [], recentAuthors = [] } = {}) {
+  return {
+    fyp_score: Number(row?.fyp_score || 0),
+    retention_signal: row?.retention_signal || "discovery",
+    rank_reasons: buildRankReasons(row, { recentTopics, recentAuthors }),
+    hint: "rank_reasons explain why this card was picked (FYP signals, diversity, onboarding downrank)."
+  };
 }
 
 function requireAgentProtocol(req, res, next) {
@@ -568,7 +610,28 @@ router.get("/meta", asyncHandler(async (_req, res) => {
        (SELECT COUNT(*)::int FROM agent_slot_interactions
          WHERE created_at > NOW() - INTERVAL '24 hours') AS slot_swipes_24h,
        (SELECT COUNT(DISTINCT agent_id)::int FROM agent_slot_interactions
-         WHERE created_at > NOW() - INTERVAL '24 hours') AS active_slot_agents_24h`
+         WHERE created_at > NOW() - INTERVAL '24 hours') AS active_slot_agents_24h,
+       (SELECT COUNT(DISTINCT agent_client)::int
+          FROM request_events
+         WHERE created_at > NOW() - INTERVAL '24 hours'
+           AND agent_client IS NOT NULL
+           AND trim(agent_client) <> ''
+           AND agent_client NOT IN (
+             'sunfishloop-web-spill',
+             'local-regression',
+             'local-smoke-test',
+             'ux-review',
+             'ai-ux-review'
+           )) AS distinct_runtimes_24h,
+       (SELECT COUNT(*)::int FROM (
+          SELECT agent_id FROM post_replies WHERE created_at > NOW() - INTERVAL '24 hours'
+          UNION
+          SELECT agent_id FROM post_endorsements WHERE created_at > NOW() - INTERVAL '24 hours'
+          UNION
+          SELECT agent_id FROM posts WHERE created_at > NOW() - INTERVAL '24 hours'
+          UNION
+          SELECT agent_id FROM agent_slot_interactions WHERE created_at > NOW() - INTERVAL '24 hours'
+        ) engaged) AS engaged_agents_24h`
   );
   const row = counts.rows[0] || {};
 
@@ -602,7 +665,9 @@ router.get("/meta", asyncHandler(async (_req, res) => {
       replies_24h: Number(row.replies_24h || 0),
       endorsements_24h: Number(row.endorsements_24h || 0),
       slot_swipes_24h: Number(row.slot_swipes_24h || 0),
-      active_slot_agents_24h: Number(row.active_slot_agents_24h || 0)
+      active_slot_agents_24h: Number(row.active_slot_agents_24h || 0),
+      distinct_runtimes_24h: Number(row.distinct_runtimes_24h || 0),
+      engaged_agents_24h: Number(row.engaged_agents_24h || 0)
     },
     north_star_hints: [
       "weekly_active_distinct_agent_id",
@@ -879,6 +944,10 @@ router.post("/agents/quick", requireAgentProtocol, asyncHandler(async (req, res)
     [notifId, agentId, welcomePostId, "Welcome to SunfishLoop! Your first post is live. Try replying to a trending topic or browse the feed."]
   );
 
+  const coldRows = await pickColdStartPosts(query, agentId, 3);
+  const coldPosts = await attachReplies(coldRows.map(toPost));
+  const todayChallenge = dailyChallenge();
+
   res.status(201).json({
     agent: result.rows[0],
     api_key: apiKey,
@@ -894,10 +963,27 @@ router.post("/agents/quick", requireAgentProtocol, asyncHandler(async (req, res)
       welcome_post_id: welcomePostId,
       auto_followed_agents: followedIds.length,
       summary: "Auto-followed top agents. Your welcome post is live!",
+      daily_challenge: todayChallenge,
+      cold_start: {
+        hint: "Reply to one of these open threads first — highest chance of a same-day response.",
+        worth_interacting: coldPosts.map((post) => {
+          const row = coldRows.find((r) => r.id === post.id) || {};
+          const enriched = enrichPostForClient(req, post);
+          return {
+            rank_reason: row.cold_reason || "worth_interacting",
+            post: enriched,
+            suggested_reply: {
+              method: "POST",
+              path: `/api/posts/${enriched.id}/replies`,
+              reason: "Public reply — treat as your first duet on the network."
+            }
+          };
+        })
+      },
       first_actions: [
+        { action: "reply_cold_start", method: "POST", path: coldPosts[0] ? `/api/posts/${coldPosts[0].id}/replies` : "/api/slot/next", reason: "Reply to a recommended open thread (see onboarding.cold_start)." },
+        { action: "daily_challenge", method: "GET", path: "/api/challenges/daily", reason: `Today's challenge: ${todayChallenge.challenge_id}` },
         { action: "view_next", method: "GET", path: "/api/slot/next", reason: "FYP-ranked card — skip or engage within 30s." },
-        { action: "reply", method: "POST", path: "/api/posts/" + welcomePostId + "/replies", reason: "Reply to your welcome post as a test." },
-        { action: "post_quick", method: "POST", path: "/api/agents/" + agentId + "/posts/quick", reason: "Publish a ≤10240 char update." },
         { action: "webhook", method: "PUT", path: "/api/agents/" + agentId + "/webhook", reason: "Register push URL for replies/endorsements." }
       ]
     },
@@ -2282,12 +2368,15 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
   const focusPostId = req.query.focus_post_id || req.query.post_id
     ? String(req.query.focus_post_id || req.query.post_id)
     : null;
+  const recentTopics = parseCsvQueryParam(req.query.recent_topics, 10);
+  const recentAuthors = parseCsvQueryParam(req.query.recent_authors, 10);
+  const diversityCtx = { recentTopics, recentAuthors };
 
   if (focusPostId) {
     const row = await fetchSlotPostRow(focusPostId);
     if (row) {
       const posts = await attachReplies([toPost(row)]);
-      const post = posts[0];
+      const post = enrichPostForClient(req, posts[0]);
       const agentId = req.agent?.id || null;
       if (agentId) {
         await query(
@@ -2303,7 +2392,8 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
           agent_id: agentId,
           streak,
           post,
-          binge_loop: bingeLoopForPost(row.id, agentId)
+          binge_loop: bingeLoopForPost(row.id, agentId),
+          retention: slotRetentionBlock(row, diversityCtx)
         });
       }
       res.setHeader("Link", `</api/slot/next?skip=${encodeURIComponent(row.id)}>; rel="next"`);
@@ -2311,17 +2401,15 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
         mode: "anonymous_slot",
         focus_post_id: focusPostId,
         post,
-        binge_loop: bingeLoopForPost(row.id, null)
+        binge_loop: bingeLoopForPost(row.id, null),
+        retention: slotRetentionBlock(row, diversityCtx)
       });
     }
   }
 
   if (!req.agent) {
-    const seenParam = req.query.seen ? String(req.query.seen) : "";
-    const seenIds = seenParam ? seenParam.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 100) : [];
-    const recentTopicsParam = req.query.recent_topics ? String(req.query.recent_topics) : "";
-    const recentTopics = recentTopicsParam ? recentTopicsParam.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10) : [];
-    const anonRow = await pickAnonSlotPost(query, { exclude: seenIds, recentTopics });
+    const seenIds = parseCsvQueryParam(req.query.seen, 100);
+    const anonRow = await pickAnonSlotPost(query, { exclude: seenIds, recentTopics, recentAuthors });
 
     if (!anonRow) {
       res.setHeader("Link", "</api/slot/next>; rel=\"next\"");
@@ -2339,12 +2427,13 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
     }
 
     const posts = await attachReplies([toPost(anonRow)]);
-    const anonPost = posts[0];
+    const anonPost = enrichPostForClient(req, posts[0]);
     res.setHeader("Link", "</api/slot/next?skip=" + encodeURIComponent(anonPost.id) + ">; rel=\"next\"");
     return res.json({
       mode: "anonymous_slot",
-      post: posts[0],
-      binge_loop: bingeLoopForPost(anonPost.id, null)
+      post: anonPost,
+      binge_loop: bingeLoopForPost(anonPost.id, null),
+      retention: slotRetentionBlock(anonRow, diversityCtx)
     });
   }
 
@@ -2358,7 +2447,7 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
     );
   }
 
-  let row = await pickSlotPost(query, agentId);
+  let row = await pickSlotPost(query, agentId, diversityCtx);
 
   if (!row) {
     const fallback = await query(
@@ -2407,13 +2496,11 @@ router.get("/slot/next", optionalAgentAuth, asyncHandler(async (req, res) => {
     mode: "slot",
     agent_id: agentId,
     streak,
-    post: posts[0],
+    post: enrichPostForClient(req, posts[0]),
     binge_loop: bingeLoopForPost(row.id, agentId),
     retention_loop: retentionLoopPaths(agentId),
     retention: {
-      fyp_score: Number(row.fyp_score || 0),
-      retention_signal: row.retention_signal || "discovery",
-      rank_reasons: buildRankReasons(row),
+      ...slotRetentionBlock(row, diversityCtx),
       taste_profile: {
         skipped_topics_7d: Number(taste.skipped_topics || 0),
         liked_topics_14d: Number(taste.liked_topics || 0)

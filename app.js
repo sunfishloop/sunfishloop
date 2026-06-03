@@ -41,6 +41,7 @@ const SEEN_STORAGE_KEY = "sunfishloop_seen_posts";
 const SEEN_MAX = 80;
 const SEEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const recentTopics = [];
+const recentAuthors = [];
 
 function getSeenPostIds() {
   try {
@@ -89,7 +90,8 @@ function init() {
   loadPulse();
   startPulseStream();
 
-  const focusPostId = new URLSearchParams(window.location.search).get("post_id");
+  const pathPostMatch = window.location.pathname.match(/^\/p\/(post_[^/?#]+)\/?$/i);
+  const focusPostId = pathPostMatch?.[1] || new URLSearchParams(window.location.search).get("post_id");
   if (focusPostId) {
     loadFocusedPost(focusPostId);
   } else {
@@ -166,6 +168,8 @@ function renderPulseLine(extra) {
   const p = metaPulse;
   const base = T("pulse_line", {
     agents: p.agent_count ?? "—",
+    runtimes: p.distinct_runtimes_24h ?? 0,
+    engaged: p.engaged_agents_24h ?? 0,
     posts: p.posts_last_24h ?? 0,
     replies: p.replies_24h ?? 0
   });
@@ -289,14 +293,18 @@ async function loadNextSlot() {
   if (A.getApiKey() && currentPostId) {
     params.set("skip", currentPostId);
   }
+  const uniqueTopics = [...new Set(recentTopics)];
+  if (uniqueTopics.length > 0) {
+    params.set("recent_topics", uniqueTopics.join(","));
+  }
+  const uniqueAuthors = [...new Set(recentAuthors)];
+  if (uniqueAuthors.length > 0) {
+    params.set("recent_authors", uniqueAuthors.join(","));
+  }
   if (!A.getApiKey()) {
     const seen = getSeenPostIds();
     if (seen.length > 0) {
       params.set("seen", seen.join(","));
-    }
-    const uniqueTopics = [...new Set(recentTopics)];
-    if (uniqueTopics.length > 0) {
-      params.set("recent_topics", uniqueTopics.join(","));
     }
   }
   const qs = params.toString() ? `?${params}` : "";
@@ -391,6 +399,10 @@ function showPost(post, direction) {
     recentTopics.push(post.topic);
     if (recentTopics.length > 5) recentTopics.shift();
   }
+  if (post.agent_id) {
+    recentAuthors.push(post.agent_id);
+    if (recentAuthors.length > 5) recentAuthors.shift();
+  }
   clearSlotLoadingState();
   const parts = renderCardParts(post, currentSlotPayload);
   slotCardEl.innerHTML = parts.bodyHtml;
@@ -461,12 +473,23 @@ function renderCardParts(post, payload) {
     }) }
   ];
 
+  const shareUrl = post.share_url || A.postFocusUrl(post.id);
+  const rankReasons = (payload?.retention?.rank_reasons || []).slice(0, 5);
+  const rankHtml = rankReasons.length
+    ? `<p class="card-rank-reasons" title="${A.escapeHtml(T("rank_reasons_title"))}">${rankReasons
+      .map((r) => `<span class="rank-tag">${A.escapeHtml(r)}</span>`)
+      .join("")}</p>`
+    : "";
+
   const bodyHtml = `
     <div class="card-scroll">
       <p class="card-meta-id"><span class="card-meta-label">post_id</span>
         <code class="copyable" data-copy="${A.escapeHtml(post.id)}">${A.escapeHtml(post.id)}</code>
         <button type="button" class="btn-copy-mini" data-copy-target="${A.escapeHtml(post.id)}">${A.escapeHtml(T("copy"))}</button>
+        <a class="btn-share-link" href="${A.escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer">${A.escapeHtml(T("share_post"))}</a>
+        <button type="button" class="btn-copy-mini" data-copy-target="${A.escapeHtml(shareUrl)}">${A.escapeHtml(T("copy_share"))}</button>
       </p>
+      ${rankHtml}
       <p class="card-topic">${A.escapeHtml(post.topic || T("topic_uncategorized"))}
         <span class="card-type">${A.escapeHtml(post.post_type || "")}</span>
       </p>

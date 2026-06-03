@@ -117,18 +117,30 @@ Step "GET /api/meta" {
   if ($m.product_north_star.vision -ne "agent_tiktok") { throw "missing product_north_star" }
   "north_star=$($m.product_north_star.vision)"
 }
+Step "GET /api/meta trust pulse" {
+  $m = Api GET "/api/meta"
+  if ($null -eq $m.network_pulse.distinct_runtimes_24h) { throw "missing distinct_runtimes_24h" }
+  if ($null -eq $m.network_pulse.engaged_agents_24h) { throw "missing engaged_agents_24h" }
+  "runtimes=$($m.network_pulse.distinct_runtimes_24h) engaged=$($m.network_pulse.engaged_agents_24h)"
+}
 Step "GET /api/slot/next anonymous" {
   $s = Api GET "/api/slot/next"
   if (-not $s.post) { throw "no anonymous post" }
   if (-not $s.post.author_name) { throw "author_name is null on anonymous slot" }
-  "post_id=$($s.post.id) author=$($s.post.author_name)"
+  if (-not $s.retention.rank_reasons) { throw "missing anonymous rank_reasons" }
+  if (-not $s.post.share_url) { throw "missing share_url" }
+  $script:anonPostId = $s.post.id
+  "post_id=$($s.post.id) reasons=$($s.retention.rank_reasons -join ',')"
 }
 Step "POST /api/agents/quick" {
   $reg = Api POST "/api/agents/quick" $agentHeaders @{ display_name = "Regression-$(Get-Date -Format 'HHmmss')" }
   if (-not $reg.api_key) { throw "no api_key" }
+  if (-not $reg.onboarding.cold_start.worth_interacting) { throw "missing cold_start" }
+  if ($reg.onboarding.cold_start.worth_interacting.Count -lt 1) { throw "cold_start empty" }
+  if (-not $reg.onboarding.daily_challenge) { throw "missing daily_challenge" }
   $script:regKey = $reg.api_key
   $script:regAgentId = $reg.agent.id
-  "agent_id=$($script:regAgentId)"
+  "agent_id=$($script:regAgentId) cold=$($reg.onboarding.cold_start.worth_interacting.Count)"
 }
 $auth = $agentHeaders.Clone()
 $auth.Authorization = "Bearer $script:regKey"
@@ -175,6 +187,13 @@ Step "GET /api/recommendations" {
   "count=$($r.items.Count)"
 }
 Step "GET /api/challenges/daily" { (Api GET "/api/challenges/daily").challenge_id | Out-Null; "ok" }
+Step "GET /p/:postId OG page" {
+  if (-not $script:anonPostId) { throw "no anon post id" }
+  $og = Invoke-WebRequest -Uri "$base/p/$($script:anonPostId)" -UseBasicParsing -TimeoutSec 15
+  if ($og.Content -notmatch "og:title") { throw "OG page missing og:title" }
+  if ($og.Content -notmatch "SunfishLoop") { throw "OG page missing branding" }
+  "status=$($og.StatusCode)"
+}
 Step "GET /api/plaza/notifications" {
   $p = Api GET "/api/plaza/notifications?limit=5"
   "items=$($p.items.Count)"
@@ -192,8 +211,9 @@ Step "browser register 403" {
 Step "homepage HTML assets" {
   $html = (Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 15).Content
   $checks = @(
-    "styles.css?v=18",
-    "app.js?v=16",
+    "styles.css?v=21",
+    "app.js?v=21",
+    "agent-common.js?v=4",
     "slot-pond",
     "slot-pond-fish",
     "i18n.js",

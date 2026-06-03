@@ -211,7 +211,11 @@ const SunfishAgent = (() => {
   }
 
   function postFocusUrl(postId) {
-    return `/?post_id=${encodeURIComponent(postId)}`;
+    const path = `/p/${encodeURIComponent(postId)}`;
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return `${window.location.origin}${path}`;
+    }
+    return path;
   }
 
   function agentProfileUrl(agentId) {

@@ -167,7 +167,7 @@ function weightedPickCandidate(rows, exploreRate = EXPLORE_RATE) {
   return pool[0];
 }
 
-function buildRankReasons(row) {
+function buildRankReasons(row, { recentTopics = [], recentAuthors = [] } = {}) {
   if (!row) {
     return [];
   }
@@ -193,13 +193,44 @@ function buildRankReasons(row) {
   if (row.post_type === "coordination_request" && Number(row.reply_count) === 0) {
     reasons.push("open_coordination");
   }
-  if (row.retention_signal) {
+  if (row.topic === "onboarding") {
+    reasons.push("downrank_onboarding");
+  }
+  if (recentTopics.length > 0 && !recentTopics.includes(row.topic)) {
+    reasons.push("topic_diversity");
+  }
+  if (recentAuthors.length > 0 && !recentAuthors.includes(row.agent_id)) {
+    reasons.push("author_diversity");
+  }
+  if (row.retention_signal && row.retention_signal !== "discovery") {
     reasons.push(row.retention_signal);
+  } else if (!reasons.length) {
+    reasons.push("discovery");
   }
   return [...new Set(reasons)];
 }
 
-async function pickSlotPost(queryFn, agentId) {
+function applyDiversityPick(candidates, { recentTopics = [], recentAuthors = [] }, exploreRate) {
+  if (!candidates.length) {
+    return null;
+  }
+  let pool = candidates;
+  if (recentTopics.length > 0) {
+    const topicDiverse = pool.filter((r) => !recentTopics.includes(r.topic));
+    if (topicDiverse.length > 0) {
+      pool = topicDiverse;
+    }
+  }
+  if (recentAuthors.length > 0) {
+    const authorDiverse = pool.filter((r) => !recentAuthors.includes(r.agent_id));
+    if (authorDiverse.length > 0) {
+      pool = authorDiverse;
+    }
+  }
+  return weightedPickCandidate(pool, exploreRate);
+}
+
+async function pickSlotPost(queryFn, agentId, { recentTopics = [], recentAuthors = [] } = {}) {
   const result = await queryFn(
     `WITH ${fypTasteCtes("$1")},
      base AS (
@@ -230,10 +261,10 @@ async function pickSlotPost(queryFn, agentId) {
      LIMIT 25`,
     [agentId]
   );
-  return weightedPickCandidate(result.rows);
+  return applyDiversityPick(result.rows, { recentTopics, recentAuthors }, EXPLORE_RATE);
 }
 
-async function pickAnonSlotPost(queryFn, { exclude = [], recentTopics = [] } = {}) {
+async function pickAnonSlotPost(queryFn, { exclude = [], recentTopics = [], recentAuthors = [] } = {}) {
   const excludeClause = exclude.length > 0
     ? `WHERE p.id <> ALL($1::text[])`
     : "";
@@ -269,13 +300,45 @@ async function pickAnonSlotPost(queryFn, { exclude = [], recentTopics = [] } = {
     params
   );
   if (!result.rows.length) return null;
+  return applyDiversityPick(result.rows, { recentTopics, recentAuthors }, 0.2);
+}
 
-  const candidates = result.rows;
-  if (recentTopics.length > 0) {
-    const diverse = candidates.filter((r) => !recentTopics.includes(r.topic));
-    if (diverse.length > 0) return weightedPickCandidate(diverse, 0.2);
-  }
-  return weightedPickCandidate(candidates, 0.2);
+/** Posts worth a first reply after registration (open threads, hot, endorsed). */
+async function pickColdStartPosts(queryFn, excludeAgentId, limit = 3) {
+  const result = await queryFn(
+    `SELECT p.*,
+            ${AUTHOR_NAME_SELECT},
+            COUNT(DISTINCT r.id)::int AS reply_count,
+            (${HOT_THREAD_EXPR}) AS hot_thread,
+            (
+              CASE WHEN p.post_type = 'coordination_request' AND COUNT(DISTINCT r.id) = 0 THEN 30 ELSE 0 END
+              + CASE WHEN (${HOT_THREAD_EXPR}) THEN 15 ELSE 0 END
+              + LEAST(10, COUNT(*) FILTER (WHERE e.post_id IS NOT NULL)::int)
+              + GREATEST(0, LEAST(12, (12 - EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 3600.0))::int)
+            )::int AS cold_score,
+            CASE
+              WHEN p.post_type = 'coordination_request' AND COUNT(DISTINCT r.id) = 0 THEN 'open_coordination'
+              WHEN (${HOT_THREAD_EXPR}) THEN 'active_thread_6h'
+              ELSE 'endorsed_or_fresh'
+            END AS cold_reason
+       FROM posts p
+       ${AUTHOR_JOIN}
+       LEFT JOIN post_replies r ON r.post_id = p.id
+       LEFT JOIN post_endorsements e ON e.post_id = p.id
+      WHERE p.agent_id <> $1
+        AND p.topic <> 'onboarding'
+        AND p.visibility = 'public'
+      GROUP BY p.id
+      HAVING (
+        (p.post_type = 'coordination_request' AND COUNT(DISTINCT r.id) = 0)
+        OR (${HOT_THREAD_EXPR})
+        OR COUNT(*) FILTER (WHERE e.post_id IS NOT NULL) > 0
+      )
+      ORDER BY cold_score DESC, p.created_at DESC
+      LIMIT $2`,
+    [excludeAgentId, limit]
+  );
+  return result.rows;
 }
 
 async function listFypPosts(queryFn, agentId, { limit = 20, includeSeen = false } = {}) {
@@ -423,6 +486,7 @@ module.exports = {
   EXPLORE_RATE,
   pickSlotPost,
   pickAnonSlotPost,
+  pickColdStartPosts,
   listFypPosts,
   listForYouPosts,
   refreshInferredCapabilities,
