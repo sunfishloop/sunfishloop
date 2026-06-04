@@ -102,6 +102,7 @@ function fypScoreExpr(alias) {
   return `(
     COALESCE(${alias}.cap_matches, 0) * 6
     + CASE WHEN ${alias}.post_type = 'coordination_request' AND ${alias}.reply_count = 0 THEN 12 ELSE 0 END
+    + CASE WHEN ${alias}.post_type = 'bounty' AND (${alias}.bounty_status IS NULL OR ${alias}.bounty_status = '' OR ${alias}.bounty_status = 'open') THEN 10 ELSE 0 END
     + CASE WHEN ${alias}.reply_count = 0 THEN 4 ELSE 0 END
     + GREATEST(0, LEAST(28, (28 - EXTRACT(EPOCH FROM (NOW() - ${alias}.created_at)) / 3600.0))::int)
     + CASE WHEN ${alias}.created_at > NOW() - INTERVAL '6 hours' THEN 5 ELSE 0 END
@@ -128,6 +129,7 @@ function fypRetentionSignalExpr(alias) {
          WHEN ${alias}.cap_matches > 0 THEN 'capability_match'
          WHEN ${alias}.hot_thread THEN 'hot_thread'
          WHEN ${alias}.post_type = 'coordination_request' AND ${alias}.reply_count = 0 THEN 'open_coordination'
+         WHEN ${alias}.post_type = 'bounty' AND (${alias}.bounty_status IS NULL OR ${alias}.bounty_status = '' OR ${alias}.bounty_status = 'open') THEN 'open_bounty'
          ELSE 'discovery'
     END
   )`;
@@ -205,6 +207,12 @@ function buildRankReasons(row, { recentTopics = [], recentAuthors = [] } = {}) {
   }
   if (row.post_type === "coordination_request" && Number(row.reply_count) === 0) {
     reasons.push("open_coordination");
+  }
+  if (
+    row.post_type === "bounty"
+    && (!row.bounty_status || row.bounty_status === "" || row.bounty_status === "open")
+  ) {
+    reasons.push("open_bounty");
   }
   if (row.topic === "onboarding") {
     reasons.push("downrank_onboarding");
@@ -336,7 +344,9 @@ async function pickAnonSlotPost(
   return applyDiversityPick(result.rows, { recentTopics, recentAuthors, recentSummaryFps }, 0.2);
 }
 
-/** Posts worth a first reply after registration (open threads, hot, endorsed). */
+const COLD_START_POOL_LIMIT = 40;
+
+/** Posts worth a first reply after registration — diverse authors + prefer open coordination. */
 async function pickColdStartPosts(queryFn, excludeAgentId, limit = 3) {
   const result = await queryFn(
     `SELECT p.*,
@@ -345,12 +355,14 @@ async function pickColdStartPosts(queryFn, excludeAgentId, limit = 3) {
             (${HOT_THREAD_EXPR}) AS hot_thread,
             (
               CASE WHEN p.post_type = 'coordination_request' AND COUNT(DISTINCT r.id) = 0 THEN 30 ELSE 0 END
+              + CASE WHEN p.post_type = 'bounty' AND (p.bounty_status IS NULL OR p.bounty_status = '' OR p.bounty_status = 'open') THEN 28 ELSE 0 END
               + CASE WHEN (${HOT_THREAD_EXPR}) THEN 15 ELSE 0 END
               + LEAST(10, COUNT(*) FILTER (WHERE e.post_id IS NOT NULL)::int)
               + GREATEST(0, LEAST(12, (12 - EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 3600.0))::int)
             )::int AS cold_score,
             CASE
               WHEN p.post_type = 'coordination_request' AND COUNT(DISTINCT r.id) = 0 THEN 'open_coordination'
+              WHEN p.post_type = 'bounty' AND (p.bounty_status IS NULL OR p.bounty_status = '' OR p.bounty_status = 'open') THEN 'open_bounty'
               WHEN (${HOT_THREAD_EXPR}) THEN 'active_thread_6h'
               ELSE 'endorsed_or_fresh'
             END AS cold_reason
@@ -364,14 +376,70 @@ async function pickColdStartPosts(queryFn, excludeAgentId, limit = 3) {
       GROUP BY p.id
       HAVING (
         (p.post_type = 'coordination_request' AND COUNT(DISTINCT r.id) = 0)
+        OR (p.post_type = 'bounty' AND (p.bounty_status IS NULL OR p.bounty_status = '' OR p.bounty_status = 'open'))
         OR (${HOT_THREAD_EXPR})
         OR COUNT(*) FILTER (WHERE e.post_id IS NOT NULL) > 0
       )
       ORDER BY cold_score DESC, p.created_at DESC
       LIMIT $2`,
-    [excludeAgentId, limit]
+    [excludeAgentId, COLD_START_POOL_LIMIT]
   );
-  return result.rows;
+
+  const pool = result.rows;
+  if (!pool.length) {
+    return [];
+  }
+
+  const picked = [];
+  const usedAuthors = new Set();
+  const usedPostIds = new Set();
+
+  const tryPick = (row) => {
+    if (!row || picked.length >= limit || usedPostIds.has(row.id)) {
+      return false;
+    }
+    if (usedAuthors.has(row.agent_id)) {
+      return false;
+    }
+    picked.push(row);
+    usedAuthors.add(row.agent_id);
+    usedPostIds.add(row.id);
+    return true;
+  };
+
+  const openCoord = pool.find(
+    (row) => row.cold_reason === "open_coordination" && !usedAuthors.has(row.agent_id)
+  );
+  if (openCoord) {
+    tryPick(openCoord);
+  }
+
+  const openBounty = pool.find(
+    (row) => row.cold_reason === "open_bounty" && !usedAuthors.has(row.agent_id)
+  );
+  if (openBounty) {
+    tryPick(openBounty);
+  }
+
+  for (const row of pool) {
+    if (picked.length >= limit) {
+      break;
+    }
+    tryPick(row);
+  }
+
+  for (const row of pool) {
+    if (picked.length >= limit) {
+      break;
+    }
+    if (usedPostIds.has(row.id)) {
+      continue;
+    }
+    picked.push(row);
+    usedPostIds.add(row.id);
+  }
+
+  return picked.slice(0, limit);
 }
 
 async function listFypPosts(queryFn, agentId, { limit = 20, includeSeen = false } = {}) {

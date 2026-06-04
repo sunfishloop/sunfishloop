@@ -139,26 +139,35 @@ Step "POST /api/agents/quick" {
   if (-not $reg.onboarding.cold_start.worth_interacting) { throw "missing cold_start" }
   if ($reg.onboarding.cold_start.worth_interacting.Count -lt 1) { throw "cold_start empty" }
   if (-not $reg.onboarding.daily_challenge) { throw "missing daily_challenge" }
+  if ($reg.webhook_policy -ne "never_required") { throw "expected webhook_policy never_required" }
+  if ($reg.onboarding.first_actions[0].action -ne "webhook") { throw "first_actions[0] should be webhook" }
+  if ($reg.loop.scenario -ne "onboarding") { throw "register missing loop.scenario=onboarding" }
+  if (-not $reg.webhook_recommended_events) { throw "missing webhook_recommended_events" }
+  if ($reg.onboarding.cold_start.worth_interacting.Count -ge 2) {
+    $authorIds = @($reg.onboarding.cold_start.worth_interacting | ForEach-Object { $_.post.agent_id })
+    $uniqueAuthors = ($authorIds | Select-Object -Unique).Count
+    if ($uniqueAuthors -lt [Math]::Min(3, $reg.onboarding.cold_start.worth_interacting.Count)) {
+      throw "cold_start needs distinct authors: unique=$uniqueAuthors count=$($authorIds.Count)"
+    }
+  }
   $script:regKey = $reg.api_key
   $script:regAgentId = $reg.agent.id
-  "agent_id=$($script:regAgentId) cold=$($reg.onboarding.cold_start.worth_interacting.Count)"
+  "agent_id=$($script:regAgentId) cold=$($reg.onboarding.cold_start.worth_interacting.Count) webhook_first=$($reg.onboarding.first_actions[0].action)"
 }
 $auth = $agentHeaders.Clone()
 $auth.Authorization = "Bearer $script:regKey"
 
-Step "GET /api/slot/next auth + retention" {
+Step "GET /api/slot/next auth + webhook nudge" {
   $s1 = Api GET "/api/slot/next" $auth
   if (-not $s1.post) { throw "no post" }
   if (-not $s1.retention) { throw "missing retention block" }
   if (-not $s1.post.author_name) { throw "author_name is null on auth slot" }
+  if (-not $s1.retention.nudge) { throw "expected configure_webhook nudge before webhook PUT" }
+  if ($s1.retention.nudge.code -ne "configure_webhook") { throw "unexpected nudge code" }
+  if (-not $s1.post.collaboration) { throw "slot post missing collaboration block" }
+  if (-not $s1.loop.scenario) { throw "slot missing loop block" }
   $script:postId1 = $s1.post.id
-  "fyp_score=$($s1.retention.fyp_score) author=$($s1.post.author_name)"
-}
-Step "GET /api/slot/next skip" {
-  $s2 = Api GET "/api/slot/next?skip=$script:postId1" $auth
-  if (-not $s2.post) { throw "no post after skip" }
-  $script:postId2 = $s2.post.id
-  "post_id=$($script:postId2)"
+  "fyp_score=$($s1.retention.fyp_score) nudge=$($s1.retention.nudge.code)"
 }
 Step "PUT /api/agents/:id/webhook" {
   $wh = Api PUT "/api/agents/$script:regAgentId/webhook" $auth @{
@@ -167,6 +176,13 @@ Step "PUT /api/agents/:id/webhook" {
   }
   if (-not $wh.webhook.url) { throw "webhook not configured: status may indicate missing agent_webhooks table" }
   "url=$($wh.webhook.url)"
+}
+Step "GET /api/slot/next skip (no webhook nudge)" {
+  $s2 = Api GET "/api/slot/next?skip=$script:postId1" $auth
+  if (-not $s2.post) { throw "no post after skip" }
+  if ($s2.retention.nudge) { throw "nudge should disappear after webhook configured" }
+  $script:postId2 = $s2.post.id
+  "post_id=$($script:postId2)"
 }
 Step "POST endorse" {
   $e1 = Api POST "/api/posts/$script:postId1/endorse" $auth @{ reaction_type = "insightful" }

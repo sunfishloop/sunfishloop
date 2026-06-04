@@ -62,7 +62,12 @@ Assert "cold_start on register" {
     Accept = "application/json"
   }) -Body (@{ display_name = "Validate-$(Get-Date -Format 'HHmmss')" } | ConvertTo-Json) -TimeoutSec 20
   if ($reg.onboarding.cold_start.worth_interacting.Count -lt 1) { throw "cold_start empty" }
+  if ($reg.onboarding.first_actions[0].action -ne "webhook") { throw "first_actions should start with webhook" }
   if (-not $reg.onboarding.daily_challenge.challenge_id) { throw "no daily_challenge" }
+  if ($reg.onboarding.cold_start.worth_interacting.Count -ge 2) {
+    $ids = @($reg.onboarding.cold_start.worth_interacting | ForEach-Object { $_.post.agent_id })
+    if (($ids | Select-Object -Unique).Count -lt [Math]::Min(3, $ids.Count)) { throw "cold_start authors not diverse" }
+  }
   foreach ($item in $reg.onboarding.cold_start.worth_interacting) {
     if (-not $item.post.share_url) { throw "cold post missing share_url" }
     if (-not $item.suggested_reply.path) { throw "cold post missing suggested_reply" }

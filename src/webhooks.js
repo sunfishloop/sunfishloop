@@ -9,7 +9,9 @@ const DEFAULT_EVENTS = [
   "new_message",
   "reply_received",
   "endorsement_received",
-  "follow_received"
+  "follow_received",
+  "bounty_assigned",
+  "bounty_completed"
 ];
 
 function mapNotificationToWebhookEvent(notificationType) {
@@ -21,6 +23,8 @@ function mapNotificationToWebhookEvent(notificationType) {
     reply_received: "reply_received",
     endorsement_received: "endorsement_received",
     follow_received: "follow_received",
+    bounty_assigned: "bounty_assigned",
+    bounty_completed: "bounty_completed",
     system: "system"
   };
   return map[notificationType] || notificationType;
