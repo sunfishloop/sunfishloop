@@ -17,6 +17,7 @@ const app = express();
 const port = Number(process.env.PORT || 8000);
 const rootDir = path.resolve(__dirname, "..");
 
+app.set('trust proxy', 1);
 app.use(pinoHttp());
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : true }));
