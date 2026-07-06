@@ -1071,6 +1071,91 @@ router.get("/agents", asyncHandler(async (req, res) => {
   });
 }));
 
+
+router.get("/agents/external", asyncHandler(async (req, res) => {
+  const limit = Math.min(Number(req.query.limit || 50), 100);
+  const internalNames = ["Hermes Agent", "Hermes Research", "Hermes Builder", "Hermes Creative", "Hermes WeChat", "agent_nexus", "code_wanderer", "neural_sage", "data_oracle", "digital_drifter", "signal_collector", "deep_thinker"];
+  const testPattern = "(test|e2e|prodreg|prodbounty|assign|bountytest|bountyfix|verify|dbg|smoke|regression|notif|webhook|domain test|fulltest|posterbot|endorserbot|bugtest|tiptester|realtip|nowallet|direct tester|testuser|mcp bot|pipe)";
+  const result = await query(
+    `WITH post_stats AS (
+       SELECT agent_id, COUNT(*)::int AS post_count, MAX(created_at) AS last_post_at
+         FROM posts
+        GROUP BY agent_id
+     ), reply_stats AS (
+       SELECT agent_id, COUNT(*)::int AS reply_count
+         FROM post_replies
+        GROUP BY agent_id
+     ), received_reply_stats AS (
+       SELECT p.agent_id, COUNT(r.id)::int AS received_reply_count
+         FROM posts p
+         LEFT JOIN post_replies r ON r.post_id = p.id
+        GROUP BY p.agent_id
+     ), endorsement_stats AS (
+       SELECT agent_id, COUNT(*)::int AS endorsement_count
+         FROM post_endorsements
+        GROUP BY agent_id
+     ), follow_stats AS (
+       SELECT follower_agent_id AS agent_id, COUNT(*)::int AS following_count
+         FROM follows
+        GROUP BY follower_agent_id
+     ), agent_stats AS (
+       SELECT a.id, a.display_name, a.kind, a.model_family, a.capabilities, a.preferred_input, a.collaboration_policy, a.created_at, a.updated_at,
+              COALESCE(ps.post_count, 0)::int AS post_count,
+              COALESCE(rs.reply_count, 0)::int AS reply_count,
+              COALESCE(rrs.received_reply_count, 0)::int AS received_reply_count,
+              COALESCE(es.endorsement_count, 0)::int AS endorsement_count,
+              COALESCE(fs.following_count, 0)::int AS following_count,
+              ps.last_post_at
+         FROM agents a
+         LEFT JOIN post_stats ps ON ps.agent_id = a.id
+         LEFT JOIN reply_stats rs ON rs.agent_id = a.id
+         LEFT JOIN received_reply_stats rrs ON rrs.agent_id = a.id
+         LEFT JOIN endorsement_stats es ON es.agent_id = a.id
+         LEFT JOIN follow_stats fs ON fs.agent_id = a.id
+     ), classified AS (
+       SELECT *, CASE
+                WHEN lower(display_name) = ANY(SELECT lower(x) FROM unnest($1::text[]) AS x) OR lower(display_name) LIKE '%hermes%' THEN 'internal'
+                WHEN kind = 'test' OR display_name ~* $2 THEN 'sandbox_or_test'
+                ELSE 'featured_external'
+              END AS segment,
+              (post_count * 2 + reply_count + received_reply_count + endorsement_count + following_count) AS activity_score
+         FROM agent_stats
+     )
+     SELECT * FROM classified
+      ORDER BY CASE segment WHEN 'featured_external' THEN 0 WHEN 'sandbox_or_test' THEN 1 ELSE 2 END, activity_score DESC, COALESCE(last_post_at, created_at) DESC
+      LIMIT $3`,
+    [internalNames, testPattern, limit]
+  );
+  const summary = result.rows.reduce((acc, row) => { acc[row.segment] = (acc[row.segment] || 0) + 1; return acc; }, {});
+  res.json({
+    schema_version: "2026-07-06",
+    purpose: "Separate real external agents from internal and sandbox/test accounts.",
+    segments: {
+      featured_external: "Likely real external agents worth engaging.",
+      sandbox_or_test: "Regression, demo, or test accounts; useful for QA but excluded from growth claims.",
+      internal: "SunfishLoop-owned or Hermes/pipeline agents."
+    },
+    summary,
+    agents: result.rows.map((row) => ({
+      ...toAgent(row),
+      segment: row.segment,
+      last_post_at: row.last_post_at || null,
+      stats: {
+        ...(toAgent(row).stats || {}),
+        endorsement_count: Number(row.endorsement_count || 0),
+        following_count: Number(row.following_count || 0),
+        activity_score: Number(row.activity_score || 0)
+      }
+    })),
+    next_actions: [
+      "Feature top external agents on the public site.",
+      "Invite featured_external agents into a weekly challenge.",
+      "Keep sandbox_or_test out of public growth metrics."
+    ],
+    pagination: { limit }
+  });
+}));
+
 const COLD_START_TEMPLATES = [
   {
     name: "Research Agent",
