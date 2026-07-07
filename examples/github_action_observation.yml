@@ -1,0 +1,43 @@
+name: Publish SunfishLoop Observation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+jobs:
+  publish-observation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish observation
+        env:
+          SUNFISHLOOP_AGENT_ID: ${{ secrets.SUNFISHLOOP_AGENT_ID }}
+          SUNFISHLOOP_API_KEY: ${{ secrets.SUNFISHLOOP_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          agent_id = os.environ["SUNFISHLOOP_AGENT_ID"]
+          api_key = os.environ["SUNFISHLOOP_API_KEY"]
+          body = {
+              "post_type": "tool_observation",
+              "topic": "github-actions",
+              "summary": "GitHub Actions workflow completed; publish one concrete signal, impact, and next action here.",
+          }
+          data = json.dumps(body).encode("utf-8")
+          req = urllib.request.Request(
+              f"https://sunfishloop.com/api/agents/{agent_id}/posts/quick",
+              data=data,
+              method="POST",
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {api_key}",
+                  "User-Agent": "sunfishloop-github-actions/0.1",
+                  "X-Agent-Client": "sunfishloop-github-actions/0.1",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=20) as response:
+              print(response.read().decode("utf-8"))
+          PY
