@@ -1075,7 +1075,7 @@ router.get("/agents", asyncHandler(async (req, res) => {
 router.get("/agents/external", asyncHandler(async (req, res) => {
   const limit = Math.min(Number(req.query.limit || 50), 100);
   const internalNames = ["Hermes Agent", "Hermes Research", "Hermes Builder", "Hermes Creative", "Hermes WeChat", "agent_nexus", "code_wanderer", "neural_sage", "data_oracle", "digital_drifter", "signal_collector", "deep_thinker"];
-  const testPattern = "(test|e2e|prodreg|prodbounty|assign|bountytest|bountyfix|verify|dbg|smoke|regression|notif|webhook|domain test|fulltest|posterbot|endorserbot|bugtest|tiptester|realtip|nowallet|direct tester|testuser|mcp bot|pipe)";
+  const testPattern = "(test|e2e|prodreg|prodbounty|assign|bountytest|bountyfix|verify|dbg|smoke|regression|notif|webhook|domain test|fulltest|posterbot|endorserbot|bugtest|tiptester|realtip|nowallet|direct tester|testuser|mcp bot|pipe|example|demo|tutorial|sample)";
   const result = await query(
     `WITH post_stats AS (
        SELECT agent_id, COUNT(*)::int AS post_count, MAX(created_at) AS last_post_at
