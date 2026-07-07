@@ -1914,3 +1914,48 @@ code {
 }
 
 .quickstart-page { min-height: 100dvh; overflow: auto; } .quickstart-shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 52px; } .quickstart-hero { min-height: min(72dvh, 620px); display: grid; align-content: center; gap: 16px; padding: 18px 0 28px; } .quickstart-brand { justify-content: flex-start; } .quickstart-kicker { margin: 0; color: var(--accent); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; } .quickstart-hero h1 { margin: 0; max-width: 780px; font-size: clamp(2.4rem, 7vw, 5.8rem); line-height: .96; letter-spacing: 0; } .quickstart-lead { margin: 0; max-width: 720px; color: var(--text-soft); font-size: clamp(1rem, 2vw, 1.24rem); line-height: 1.6; } .quickstart-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; } .quickstart-primary, .quickstart-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; border-radius: 999px; padding: 0 16px; text-decoration: none; font-weight: 700; } .quickstart-primary { color: #041316; background: var(--accent); } .quickstart-secondary { color: var(--text); border: 1px solid var(--card-border); background: rgba(255,255,255,.06); } .quickstart-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; } .quickstart-panel { border: 1px solid var(--card-border); border-radius: 8px; background: rgba(15, 23, 42, .82); padding: 18px; } .quickstart-panel--wide { margin-top: 14px; } .quickstart-step { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: #041316; background: var(--accent); font-weight: 800; font-size: .82rem; } .quickstart-panel pre { overflow-x: auto; margin: 14px 0 0; padding: 14px; border-radius: 8px; background: rgba(2,6,23,.7); border: 1px solid rgba(148,163,184,.18); } .quickstart-panel code { color: #dbeafe; } @media (max-width: 860px) { .quickstart-grid { grid-template-columns: 1fr; } .quickstart-hero { min-height: auto; padding-top: 24px; } }
+
+
+.growth-panel { width: min(1180px, calc(100% - 32px)); margin: 18px auto 0; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 18px; align-items: stretch; }
+.growth-panel__copy, .featured-agents { border: 1px solid var(--card-border); border-radius: 8px; background: rgba(15, 23, 42, .76); box-shadow: var(--shadow-soft); }
+.growth-panel__copy { padding: 22px; display: grid; align-content: center; gap: 12px; }
+.growth-kicker { margin: 0; color: var(--accent); font-size: .76rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.growth-panel h1 { margin: 0; max-width: 760px; font-size: clamp(1.9rem, 4vw, 3.8rem); line-height: 1; letter-spacing: 0; }
+.growth-panel p { margin: 0; color: var(--text-soft); line-height: 1.55; }
+.growth-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.growth-primary, .growth-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; border-radius: 999px; padding: 0 14px; text-decoration: none; font-weight: 800; }
+.growth-primary { color: #041316; background: var(--accent); }
+.growth-secondary { color: var(--text); border: 1px solid var(--card-border); background: rgba(255,255,255,.06); }
+.featured-agents { padding: 16px; }
+.featured-agents__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.featured-agents__head p { margin: 0; color: var(--text); font-weight: 800; }
+.featured-agents__head a { color: var(--accent); text-decoration: none; font-size: .82rem; font-weight: 800; }
+.featured-agents__list { display: grid; gap: 10px; }
+.featured-agents__status { margin: 0; color: var(--text-soft); }
+.featured-agent-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px; border: 1px solid rgba(148,163,184,.18); border-radius: 8px; background: rgba(2,6,23,.38); }
+.featured-agent-card h2 { margin: 0; font-size: 1rem; letter-spacing: 0; }
+.featured-agent-card p { margin: 4px 0 0; color: var(--text-soft); font-size: .84rem; }
+.featured-agent-card dl { display: grid; grid-auto-flow: column; gap: 10px; margin: 0; }
+.featured-agent-card div { min-width: 0; }
+.featured-agent-card dt { color: var(--muted); font-size: .68rem; text-transform: uppercase; }
+.featured-agent-card dd { margin: 2px 0 0; color: var(--text); font-weight: 900; text-align: right; }
+.challenge-page { min-height: 100dvh; overflow: auto; }
+.challenge-shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 56px; }
+.challenge-hero { min-height: min(66dvh, 560px); display: grid; align-content: center; gap: 16px; }
+.challenge-brand { justify-content: flex-start; }
+.challenge-kicker, .challenge-label { margin: 0; color: var(--accent); font-size: .76rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.challenge-hero h1 { margin: 0; max-width: 820px; font-size: clamp(2.3rem, 7vw, 5.6rem); line-height: .96; letter-spacing: 0; }
+.challenge-lead { margin: 0; max-width: 760px; color: var(--text-soft); font-size: clamp(1rem, 2vw, 1.2rem); line-height: 1.6; }
+.challenge-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.challenge-primary, .challenge-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; border-radius: 999px; padding: 0 16px; text-decoration: none; font-weight: 800; }
+.challenge-primary { color: #041316; background: var(--accent); }
+.challenge-secondary { color: var(--text); border: 1px solid var(--card-border); background: rgba(255,255,255,.06); }
+.challenge-grid { display: grid; grid-template-columns: 1.4fr .8fr .8fr; gap: 14px; }
+.challenge-card, .challenge-panel { border: 1px solid var(--card-border); border-radius: 8px; background: rgba(15, 23, 42, .82); padding: 18px; }
+.challenge-card h2, .challenge-panel h2 { margin: 8px 0 8px; font-size: 1.2rem; letter-spacing: 0; }
+.challenge-card p, .challenge-panel li { color: var(--text-soft); line-height: 1.55; }
+.challenge-card pre { overflow-x: auto; margin: 14px 0 0; padding: 14px; border-radius: 8px; background: rgba(2,6,23,.7); border: 1px solid rgba(148,163,184,.18); }
+.challenge-panel { margin-top: 14px; }
+.challenge-panel ul { margin: 10px 0 0; padding-left: 18px; }
+@media (max-width: 920px) { .growth-panel, .challenge-grid { grid-template-columns: 1fr; } .challenge-hero { min-height: auto; padding-top: 24px; } }
+@media (max-width: 620px) { .featured-agent-card { grid-template-columns: 1fr; } .featured-agent-card dl { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); } .featured-agent-card dd { text-align: left; } }

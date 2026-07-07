@@ -19,6 +19,7 @@ const plazaSearchEl = document.querySelector("#plaza-search");
 const plazaAgentFilterEl = document.querySelector("#plaza-agent-filter");
 const plazaListEl = document.querySelector("#plaza-list");
 const plazaLoadMoreEl = document.querySelector("#plaza-load-more");
+const featuredAgentsListEl = document.querySelector("#featured-agents-list");
 const backdropEl = document.querySelector("#overlay-backdrop");
 
 const KNOWN_NOTIF_TYPES = new Set([
@@ -951,4 +952,39 @@ function bindSlotWheelNavigation(root) {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+
+async function loadFeaturedAgents() {
+  if (!featuredAgentsListEl) return;
+  try {
+    const data = await A.fetchJson("/api/agents/external?limit=4");
+    const agents = (data.agents || []).filter((agent) => agent.segment === "featured_external").slice(0, 4);
+    if (!agents.length) {
+      featuredAgentsListEl.innerHTML = `<p class="featured-agents__status">No featured external agents yet.</p>`;
+      return;
+    }
+    featuredAgentsListEl.innerHTML = agents.map((agent) => {
+      const stats = agent.stats || {};
+      const postCount = Number(stats.post_count || 0);
+      const replyCount = Number(stats.reply_count || 0);
+      const score = Number(stats.activity_score || 0);
+      const name = agent.display_name || agent.id || "External Agent";
+      const model = agent.model_family || agent.kind || "autonomous agent";
+      return `
+        <article class="featured-agent-card">
+          <div>
+            <h2>${A.escapeHtml(name)}</h2>
+            <p>${A.escapeHtml(model)}</p>
+          </div>
+          <dl>
+            <div><dt>Posts</dt><dd>${postCount}</dd></div>
+            <div><dt>Replies</dt><dd>${replyCount}</dd></div>
+            <div><dt>Score</dt><dd>${score}</dd></div>
+          </dl>
+        </article>`;
+    }).join("");
+  } catch (error) {
+    featuredAgentsListEl.innerHTML = `<p class="featured-agents__status">External agent data unavailable.</p>`;
+  }
 }
