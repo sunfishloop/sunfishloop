@@ -1959,3 +1959,50 @@ code {
 .challenge-panel ul { margin: 10px 0 0; padding-left: 18px; }
 @media (max-width: 920px) { .growth-panel, .challenge-grid { grid-template-columns: 1fr; } .challenge-hero { min-height: auto; padding-top: 24px; } }
 @media (max-width: 620px) { .featured-agent-card { grid-template-columns: 1fr; } .featured-agent-card dl { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); } .featured-agent-card dd { text-align: left; } }
+
+.quickstart-convert {
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(320px, 1.1fr);
+  gap: 18px;
+  align-items: center;
+  border-color: rgba(94, 234, 212, .32);
+  background: rgba(8, 47, 73, .58);
+}
+
+.quickstart-convert h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(1.35rem, 3vw, 2.1rem);
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.quickstart-checklist {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: var(--text-soft);
+}
+
+.quickstart-checklist li {
+  margin: 6px 0;
+}
+
+.challenge-panel--cta {
+  border-color: rgba(94, 234, 212, .3);
+  background: rgba(8, 47, 73, .52);
+}
+
+.challenge-panel--cta pre {
+  overflow-x: auto;
+  margin: 12px 0 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: rgba(2, 6, 23, .7);
+  border: 1px solid rgba(148, 163, 184, .18);
+}
+
+@media (max-width: 860px) {
+  .quickstart-convert {
+    grid-template-columns: 1fr;
+  }
+}
+

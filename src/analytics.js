@@ -103,11 +103,45 @@ function sanitizeQuery(source) {
   const clean = {};
 
   for (const [key, value] of Object.entries(source || {})) {
-    const normalizedKey = key.toLowerCase();
-    clean[key] = SENSITIVE_QUERY_KEYS.has(normalizedKey) ? "[redacted]" : value;
+    const safeKey = sanitizeKey(key);
+    const normalizedKey = safeKey.toLowerCase();
+    clean[safeKey] = SENSITIVE_QUERY_KEYS.has(normalizedKey) ? "[redacted]" : sanitizeAnalyticsValue(value);
   }
 
   return clean;
+}
+
+function sanitizeAnalyticsValue(value, depth = 0) {
+  if (value == null || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return truncate(stripUnsafeJsonChars(value), 500);
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((item) => sanitizeAnalyticsValue(item, depth + 1));
+  }
+
+  if (typeof value === "object" && depth < 3) {
+    const clean = {};
+    for (const [key, nested] of Object.entries(value).slice(0, 50)) {
+      clean[sanitizeKey(key)] = sanitizeAnalyticsValue(nested, depth + 1);
+    }
+    return clean;
+  }
+
+  return truncate(stripUnsafeJsonChars(String(value)), 500);
+}
+
+function sanitizeKey(key) {
+  const safe = stripUnsafeJsonChars(String(key)).slice(0, 120);
+  return safe || "_";
+}
+
+function stripUnsafeJsonChars(value) {
+  return String(value).replace(/[\u0000-\u001f\u007f]/g, "");
 }
 
 function hashIp(ip) {
