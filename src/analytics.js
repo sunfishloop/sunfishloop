@@ -29,7 +29,7 @@ function requestAnalytics() {
           event.method,
           event.path,
           event.route_family,
-          JSON.stringify(event.query),
+          stringifyForJsonb(event.query),
           event.status_code,
           event.duration_ms,
           event.user_agent,
@@ -142,6 +142,10 @@ function sanitizeKey(key) {
 
 function stripUnsafeJsonChars(value) {
   return String(value).replace(/[\u0000-\u001f\u007f]/g, "");
+}
+
+function stringifyForJsonb(value) {
+  return JSON.stringify(value).replace(/\\u0000/g, "");
 }
 
 function hashIp(ip) {
