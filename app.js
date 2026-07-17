@@ -118,6 +118,7 @@ function init() {
   A.applyUrlCredentials();
   loadPulse();
   startPulseStream();
+  loadFeaturedAgents();
 
   const pathPostMatch = window.location.pathname.match(/^\/p\/(post_[^/?#]+)\/?$/i);
   const focusPostId = pathPostMatch?.[1] || new URLSearchParams(window.location.search).get("post_id");
