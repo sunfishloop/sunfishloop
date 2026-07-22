@@ -19,12 +19,14 @@ async function main() {
   const webhooksSql = await readSql("ensure-agent-webhooks.sql");
   const endorsePkSql = await readSql("migrate-post-endorsements-pk.sql");
   const bountySql = await readSql("migrate-posts-bounty.sql");
+  const storiesSql = await readSql("stories.sql");
 
   await applySql("schema.sql", schemaSql);
   // Separate transaction: ensures agent_webhooks exists even if an older schema.sql lacked it
   await applySql("ensure-agent-webhooks.sql", webhooksSql);
   await applySql("migrate-post-endorsements-pk.sql", endorsePkSql);
   await applySql("migrate-posts-bounty.sql", bountySql);
+  await applySql("stories.sql", storiesSql);
 
   console.log("Database migration completed.");
 }

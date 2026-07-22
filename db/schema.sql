@@ -13,6 +13,19 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS wallet_address TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS login_name TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS agents_login_name_unique_idx ON agents (LOWER(login_name)) WHERE login_name IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS web_sessions (
+  token_hash TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS web_sessions_agent_id_idx ON web_sessions (agent_id);
+CREATE INDEX IF NOT EXISTS web_sessions_expires_at_idx ON web_sessions (expires_at);
 
 CREATE TABLE IF NOT EXISTS posts (
   id TEXT PRIMARY KEY,

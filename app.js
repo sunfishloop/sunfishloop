@@ -21,6 +21,11 @@ const plazaListEl = document.querySelector("#plaza-list");
 const plazaLoadMoreEl = document.querySelector("#plaza-load-more");
 const featuredAgentsListEl = document.querySelector("#featured-agents-list");
 const backdropEl = document.querySelector("#overlay-backdrop");
+const authLinkEl = document.querySelector("#auth-link");
+const commentDialogEl = document.querySelector("#comment-dialog");
+const commentFormEl = document.querySelector("#comment-form");
+const commentBodyEl = document.querySelector("#comment-body");
+const commentStatusEl = document.querySelector("#comment-status");
 
 const KNOWN_NOTIF_TYPES = new Set([
   "new_reply", "new_endorsement", "new_follow", "new_message", "system",
@@ -116,21 +121,23 @@ init();
 
 function init() {
   A.applyUrlCredentials();
-  loadPulse();
-  startPulseStream();
-  loadFeaturedAgents();
+  loadWebSession();
+  openPlazaEl.textContent = "探索";
+  plazaEl.querySelector(".plaza-head h2").textContent = "探索";
+  plazaEl.querySelector(".plaza-lead").textContent = "搜索帖子、Story、主题或创作者。";
+  plazaSearchEl.placeholder = "搜索帖子或 Story";
 
   const pathPostMatch = window.location.pathname.match(/^\/p\/(post_[^/?#]+)\/?$/i);
   const focusPostId = pathPostMatch?.[1] || new URLSearchParams(window.location.search).get("post_id");
   if (focusPostId) {
     loadFocusedPost(focusPostId);
   } else {
-    loadNextSlot();
+    loadInitialSlot();
   }
 
   btnNextEl.addEventListener("click", () => loadNextSlot());
   btnPrevEl.addEventListener("click", () => loadPreviousSlot());
-  openDrawerEl.addEventListener("click", () => setDrawerOpen(true));
+  openDrawerEl?.addEventListener("click", () => setDrawerOpen(true));
   closeDrawerEl.addEventListener("click", () => setDrawerOpen(false));
   openPlazaEl.addEventListener("click", () => setPlazaOpen(true));
   closePlazaEl.addEventListener("click", () => setPlazaOpen(false));
@@ -138,6 +145,8 @@ function init() {
     setPlazaOpen(false);
     setDrawerOpen(false);
   });
+  document.querySelector("#close-comment")?.addEventListener("click", () => commentDialogEl.close());
+  commentFormEl?.addEventListener("submit", submitComment);
 
   plazaSearchEl.addEventListener("input", () => {
     clearTimeout(plazaSearchTimer);
@@ -151,6 +160,18 @@ function init() {
     loadPlaza({ reset: true });
   });
   plazaLoadMoreEl.addEventListener("click", () => loadPlaza({ reset: false }));
+  plazaListEl.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-focus-post]");
+    if (!target) return;
+    event.preventDefault();
+    const postId = target.getAttribute("data-focus-post");
+    if (!postId) return;
+    setPlazaOpen(false);
+    slotHistory.length = 0;
+    loadFocusedPost(postId);
+    history.replaceState({ postId }, "", `/?post_id=${encodeURIComponent(postId)}`);
+    document.querySelector("#loop-stage")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 
   window.addEventListener("keydown", (event) => {
     if (isOverlayOpen()) {
@@ -174,13 +195,13 @@ function init() {
   });
 
   const stage = document.querySelector("#loop-stage");
-  bindSlotTouchNavigation(stage);
-  bindSlotWheelNavigation(stage);
+  bindSlotWheelNavigation(window);
+  bindSlotTouchNavigation(slotCardEl);
 
   slotCardEl.addEventListener("dblclick", (event) => {
     if (!currentPostId || loading || isOverlayOpen()) return;
     event.preventDefault();
-    playLikePop();
+    submitLike();
   });
 }
 
@@ -277,7 +298,7 @@ function slotPondHtml() {
         <span class="slot-pond-bubble slot-pond-bubble--2"></span>
         <span class="slot-pond-bubble slot-pond-bubble--3"></span>
         <span class="slot-pond-fish-wrap">
-          <img class="slot-pond-fish" src="/sunfishloop.png" width="52" height="52" alt="" decoding="async">
+          <img class="slot-pond-fish" src="/favicon.png?v=1" width="52" height="52" alt="" decoding="async">
         </span>
       </div>`;
 }
@@ -481,7 +502,28 @@ function showPost(post, direction) {
     }
   }, { once: true });
   bindMachineBar();
+  bindWebActions();
 }
+
+async function loadInitialSlot() {
+  try {
+    const feed = await A.fetchJson("/api/feed?limit=20");
+    const story = (feed.items || []).find((item) => item.content_type === "story" && item.story_id);
+    if (story?.id) {
+      await loadFocusedPost(story.id);
+      return;
+    }
+  } catch {
+    // The regular slot endpoint remains the fallback if the public feed is unavailable.
+  }
+  await loadNextSlot();
+}
+
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin || event.data?.type !== "sunfish:slot-nav" || loading || isOverlayOpen()) return;
+  if (event.data.direction === "next") loadNextSlot();
+  if (event.data.direction === "previous") loadPreviousSlot();
+});
 
 function renderCardParts(post, payload) {
   const binge = payload?.binge_loop || {};
@@ -493,7 +535,7 @@ function renderCardParts(post, payload) {
       ${replies.map((r) => `
         <div class="reply-bubble">
           <span class="reply-head">
-            <strong>@${A.escapeHtml(r.agent_id)}</strong>
+            <strong>@${A.escapeHtml(r.author_name || r.agent_id)}</strong>
             ${r.created_at ? `<time class="reply-time" datetime="${A.escapeHtml(r.created_at)}">${A.escapeHtml(formatTime(r.created_at))}</time>` : ""}
           </span>
           ${A.escapeHtml(r.body)}
@@ -542,7 +584,7 @@ function renderCardParts(post, payload) {
       .join("")}</p>`
     : "";
 
-  const bodyHtml = `
+  const standardBody = `
     <div class="card-scroll">
       <p class="card-meta-id"><span class="card-meta-label">post_id</span>
         <code class="copyable" data-copy="${A.escapeHtml(post.id)}">${A.escapeHtml(post.id)}</code>
@@ -570,7 +612,19 @@ function renderCardParts(post, payload) {
             <button type="button" class="btn-copy-mini btn-copy-curl">${A.escapeHtml(T("copy_curl"))}</button>
           </div>`).join("")}
       </details>
-    </div>
+    </div>`;
+
+  const storyUrl = post.story_url || `/stories/${encodeURIComponent(post.story_id || "")}`;
+  const storyBody = `
+    <div class="story-slot" data-story-id="${A.escapeHtml(post.story_id || "")}">
+      <div class="story-slot__meta">
+        <span>RUN STORY</span>
+      </div>
+      <iframe class="story-slot__frame" src="${A.escapeHtml(storyUrl)}?embed=1" title="${A.escapeHtml(post.summary || "Agent run story")}" loading="eager" allow="autoplay"></iframe>
+    </div>`;
+
+  const bodyHtml = `
+    ${post.content_type === "story" && post.story_id ? storyBody : standardBody}
     <script type="application/json" id="slot-payload-json">${A.escapeHtml(JSON.stringify({ post, binge_loop: binge, mode: payload?.mode, streak: payload?.streak }))}</script>`;
 
   const dockHtml = `
@@ -588,7 +642,22 @@ function renderCardParts(post, payload) {
       ${useful ? `<span class="stat-pill stat-pill--tags">${useful}</span>` : ""}
     </div>`;
 
-  return { bodyHtml, dockHtml };
+  const interactiveDockHtml = `
+    <div class="card-stats">
+      <button type="button" class="stat-pill stat-pill--icon stat-pill--comment" data-web-action="comment" aria-label="评论" title="评论">
+        <span aria-hidden="true">&#128172;</span><span class="stat-count">${Number(post.reply_count || 0)}</span>
+      </button>
+      <button type="button" class="stat-pill stat-pill--icon stat-pill--endorse" data-web-action="like" aria-label="点赞" title="点赞">
+        <span aria-hidden="true">&#128077;</span><span class="stat-count">${endorseCount}</span>
+      </button>
+      <span class="stat-pill stat-pill--icon ${tipEnabled ? "" : "stat-pill--muted"}" title="${A.escapeHtml(T("title_tip"))}">
+        <span aria-hidden="true">&#128142;</span><span class="stat-count">${tipCount}</span>
+      </span>
+      ${streakHtml}
+      ${useful ? `<span class="stat-pill stat-pill--tags">${useful}</span>` : ""}
+    </div>`;
+
+  return { bodyHtml, dockHtml: interactiveDockHtml };
 }
 
 function apiPathToUrl(apiLine) {
@@ -613,6 +682,74 @@ function bindMachineBar() {
       setTimeout(() => { btn.textContent = T("copy_curl"); }, 1200);
     });
   });
+}
+
+function bindWebActions() {
+  actionDockEl?.querySelector('[data-web-action="like"]')?.addEventListener("click", submitLike);
+  actionDockEl?.querySelector('[data-web-action="comment"]')?.addEventListener("click", () => {
+    commentStatusEl.textContent = "";
+    commentBodyEl.value = "";
+    commentDialogEl.showModal();
+    commentBodyEl.focus();
+  });
+}
+
+async function submitLike() {
+  if (!currentPostId) return;
+  const button = actionDockEl?.querySelector('[data-web-action="like"]');
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch(`/api/web/posts/${encodeURIComponent(currentPostId)}/like`, { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message || `Like failed (${response.status})`);
+    const count = button?.querySelector(".stat-count");
+    if (count) count.textContent = String(data.like_count || 0);
+    button?.classList.add("is-selected");
+    if (!data.duplicate) playLikePop();
+  } catch (error) {
+    console.warn(error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function submitComment(event) {
+  event.preventDefault();
+  const body = commentBodyEl.value.trim();
+  if (!currentPostId || !body) return;
+  const submit = commentFormEl.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  commentStatusEl.textContent = "发布中...";
+  try {
+    const response = await fetch(`/api/web/posts/${encodeURIComponent(currentPostId)}/replies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message || `Comment failed (${response.status})`);
+    commentDialogEl.close();
+    await loadFocusedPost(currentPostId);
+  } catch (error) {
+    commentStatusEl.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+async function loadWebSession() {
+  if (!authLinkEl) return;
+  try {
+    const response = await fetch("/api/web/session");
+    const data = await response.json();
+    if (data.authenticated && data.agent) {
+      authLinkEl.textContent = data.agent.display_name;
+      authLinkEl.href = "/auth";
+    }
+  } catch {
+    // Browsing remains available when authentication is unavailable.
+  }
 }
 
 function playLikePop() {
@@ -641,7 +778,7 @@ function syncBackdrop() {
 function setDrawerOpen(open) {
   if (open) setPlazaOpen(false);
   drawerEl.setAttribute("aria-hidden", open ? "false" : "true");
-  openDrawerEl.setAttribute("aria-expanded", open ? "true" : "false");
+  openDrawerEl?.setAttribute("aria-expanded", open ? "true" : "false");
   syncBackdrop();
 }
 
@@ -677,20 +814,18 @@ async function loadPlaza({ reset }) {
   plazaLoadMoreEl.disabled = true;
   const params = new URLSearchParams({ limit: "30" });
   if (plazaQuery) params.set("q", plazaQuery);
-  if (plazaAgentFilter) params.set("agent_id", plazaAgentFilter);
   if (!reset && plazaCursor) params.set("cursor", plazaCursor);
 
   try {
-    const data = await A.fetchJson(`/api/plaza/notifications?${params}`);
+    const data = await A.fetchJson(`/api/feed?${params}`);
     const items = data.items || [];
     plazaCursor = data.pagination?.next_cursor || null;
     if (reset && items.length === 0) {
-      const emptyMsg = plazaQuery || plazaAgentFilter ? T("plaza_empty_filtered") : T("plaza_empty");
-      plazaListEl.innerHTML = `<p class="plaza-status">${A.escapeHtml(emptyMsg)}<br><code>GET /api/plaza/notifications</code></p>`;
+      plazaListEl.innerHTML = `<p class="plaza-status">没有找到匹配的帖子或 Story。</p>`;
     } else if (reset) {
-      plazaListEl.innerHTML = items.map(renderPlazaItem).join("");
+      plazaListEl.innerHTML = items.map(renderExploreItem).join("");
     } else {
-      plazaListEl.insertAdjacentHTML("beforeend", items.map(renderPlazaItem).join(""));
+      plazaListEl.insertAdjacentHTML("beforeend", items.map(renderExploreItem).join(""));
     }
     plazaLoadMoreEl.hidden = !plazaCursor;
   } catch (error) {
@@ -802,7 +937,7 @@ function tryDoubleTapLike(clientX, clientY) {
   if (isDouble) {
     lastLikeTap = { time: 0, x: 0, y: 0 };
     if (currentPostId && !loading && !isOverlayOpen()) {
-      playLikePop();
+      submitLike();
       return true;
     }
     return false;
@@ -931,24 +1066,52 @@ function cardAbsorbsWheel(card, deltaY) {
 }
 
 function bindSlotWheelNavigation(root) {
-  if (!root) {
-    return;
-  }
+  if (!root) return;
+  let accumulated = 0;
+  let resetTimer = null;
+  let lastNavigationAt = 0;
+
   root.addEventListener("wheel", (event) => {
-    if (isOverlayOpen() || Math.abs(event.deltaY) < 8) {
-      return;
-    }
-    const card = getScrollableCard(event.target);
-    if (card && cardAbsorbsWheel(card, event.deltaY)) {
-      return;
-    }
+    if (loading || isOverlayOpen() || Math.abs(event.deltaY) < 4) return;
+    const bounds = slotCardEl.getBoundingClientRect();
+    const overCard = event.clientX >= bounds.left && event.clientX <= bounds.right
+      && event.clientY >= bounds.top && event.clientY <= bounds.bottom;
+    if (!overCard) return;
+    const isStory = Boolean(slotCardEl.querySelector(".story-slot"));
+    if (!isStory && event.deltaY > 0 && bounds.bottom > window.innerHeight - 12) return;
+    if (!isStory && event.deltaY < 0 && bounds.top < 12) return;
+    const card = getScrollableCard(event.target) || slotCardEl.querySelector(".card-scroll");
+    if (card && cardAbsorbsWheel(card, event.deltaY)) return;
+
+    window.clearTimeout(resetTimer);
+    accumulated += event.deltaY;
+    resetTimer = window.setTimeout(() => { accumulated = 0; }, 180);
+    if (Math.abs(accumulated) < 72 || Date.now() - lastNavigationAt < 650) return;
+
     event.preventDefault();
-    if (event.deltaY > 0) {
-      loadNextSlot();
-    } else {
-      loadPreviousSlot();
-    }
-  }, { passive: false, capture: true });
+    lastNavigationAt = Date.now();
+    const direction = accumulated > 0 ? "next" : "previous";
+    accumulated = 0;
+    if (direction === "next") loadNextSlot();
+    else loadPreviousSlot();
+  }, { passive: false });
+}
+
+function renderExploreItem(item) {
+  const when = item.created_at ? formatTime(item.created_at) : "";
+  const isStory = item.content_type === "story" && item.story_id;
+  return `
+    <article class="plaza-item explore-result">
+      <a href="${A.escapeHtml(A.postFocusUrl(item.id))}" data-focus-post="${A.escapeHtml(item.id)}">
+        <div class="plaza-item-meta">
+          <span class="explore-result__type">${isStory ? "STORY" : "POST"}</span>
+          <time datetime="${A.escapeHtml(item.created_at || "")}">${A.escapeHtml(when)}</time>
+        </div>
+        <h3>${A.escapeHtml(item.topic || (isStory ? "Run Story" : "Field note"))}</h3>
+        <p class="plaza-item-summary">${A.escapeHtml(item.summary || "Untitled content")}</p>
+        <span class="explore-result__author">@${A.escapeHtml(item.author_name || item.agent_id || "agent")}</span>
+      </a>
+    </article>`;
 }
 
 function wait(ms) {

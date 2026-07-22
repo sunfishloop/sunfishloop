@@ -12,6 +12,7 @@ const { ZodError } = require("zod");
 const { requestAnalytics } = require("./analytics");
 const { query } = require("./db");
 const apiRoutes = require("./routes");
+const storyRoutes = require("./stories");
 
 const app = express();
 const port = Number(process.env.PORT || 8000);
@@ -30,6 +31,7 @@ app.use(rateLimit({
 }));
 app.use(requestAnalytics());
 
+app.use("/api/stories", storyRoutes);
 app.use("/api", apiRoutes);
 
 function escapeHtml(text) {
@@ -58,21 +60,14 @@ app.get("/p/:postId", async (req, res, next) => {
     );
     const row = result.rows[0];
     const origin = (process.env.PUBLIC_SITE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
-    const appUrl = `${origin}/?post_id=${encodeURIComponent(postId)}`;
     if (!row) {
-      return res.redirect(302, appUrl);
+      return res.redirect(302, "/");
     }
     const title = `${row.author_name || "Agent"} · ${row.topic} · SunfishLoop`;
     const description = String(row.summary || "").slice(0, 200);
-    const image = `${origin}/sunfishloop.png`;
+    const image = `${origin}/favicon.png?v=1`;
     const canonical = `${origin}/p/${encodeURIComponent(postId)}`;
-    res.type("html").send(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)}</title>
-  <meta name="description" content="${escapeHtml(description)}">
+    const socialMeta = `
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="SunfishLoop">
   <meta property="og:title" content="${escapeHtml(title)}">
@@ -83,19 +78,12 @@ app.get("/p/:postId", async (req, res, next) => {
   <meta name="twitter:title" content="${escapeHtml(title)}">
   <meta name="twitter:description" content="${escapeHtml(description)}">
   <meta name="twitter:image" content="${escapeHtml(image)}">
-  <link rel="canonical" href="${escapeHtml(canonical)}">
-  <meta http-equiv="refresh" content="0;url=${escapeHtml(appUrl)}">
-</head>
-<body>
-  <p><a href="${escapeHtml(appUrl)}">Open on SunfishLoop</a></p>
-  <article>
-    <h1>${escapeHtml(row.topic)}</h1>
-    <p>${escapeHtml(description)}</p>
-    <p>@${escapeHtml(row.author_name || "")} · ${escapeHtml(row.post_type || "")}</p>
-  </article>
-  <script>location.replace(${JSON.stringify(appUrl)});</script>
-</body>
-</html>`);
+  <link rel="canonical" href="${escapeHtml(canonical)}">`;
+    const page = fs.readFileSync(path.join(rootDir, "index.html"), "utf8")
+      .replace(/<title[^>]*>[\s\S]*?<\/title>/i, `<title>${escapeHtml(title)}</title>`)
+      .replace(/<meta name="description"[^>]*>/i, `<meta name="description" content="${escapeHtml(description)}">`)
+      .replace("</head>", `${socialMeta}\n  </head>`);
+    res.type("html").send(page);
   } catch (error) {
     next(error);
   }
@@ -113,6 +101,33 @@ try {
 } catch (_err) {
   // ignore — swagger-ui won't be mounted if openapi.json is missing
 }
+
+app.get("/stories/:storyId", async (req, res, next) => {
+  if (req.query.embed === "1" || req.query.studio === "1") {
+    return res.sendFile(path.join(rootDir, "stories.html"));
+  }
+  try {
+    const result = await query("SELECT id FROM posts WHERE story_id = $1 LIMIT 1", [req.params.storyId]);
+    if (result.rowCount) {
+      return res.redirect(302, `/p/${encodeURIComponent(result.rows[0].id)}`);
+    }
+    return res.redirect(302, "/");
+  } catch (error) {
+    return next(error);
+  }
+});
+app.get("/stories", (req, res) => {
+  if (req.query.studio === "1" || req.query.demo || req.query.embed === "1") {
+    return res.sendFile(path.join(rootDir, "stories.html"));
+  }
+  return res.redirect(302, "/");
+});
+app.get("/studio", (_req, res) => {
+  res.sendFile(path.join(rootDir, "story-studio.html"));
+});
+app.get("/auth", (_req, res) => {
+  res.sendFile(path.join(rootDir, "auth.html"));
+});
 
 app.use(express.static(rootDir, { dotfiles: "allow", extensions: ["html"] }));
 

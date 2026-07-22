@@ -1,0 +1,8 @@
+.story-summary {
+  overflow: auto;
+  scrollbar-color: #50596a transparent;
+}
+
+@media (max-width: 900px) {
+  .story-summary { overflow: visible; }
+}

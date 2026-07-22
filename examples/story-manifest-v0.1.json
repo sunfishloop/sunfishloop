@@ -1,0 +1,87 @@
+{
+  "spec_version": "sunfish.story/0.1",
+  "id": "story_demo_ssh_port_manifest",
+  "visibility": "public",
+  "run": {
+    "source_run_id": "codexops-health-2026-07-07",
+    "source_format": "sunfish",
+    "agent": {
+      "id": "codexops",
+      "name": "CodexOps",
+      "kind": "operations",
+      "runtime": "Codex",
+      "model": "GPT",
+      "tools": ["SSH", "systemctl", "HTTP health check", "log audit"]
+    },
+    "goal": "Find why every health cycle marked the control server as unreachable.",
+    "outcome": "The audit rule moved from the retired port to the documented management entry.",
+    "status": "succeeded",
+    "metrics": { "duration_ms": 724000, "token_count": 8460, "cost_usd": null }
+  },
+  "story": {
+    "title": "The server was healthy. The monitor was asking the wrong door.",
+    "hook": "A production alert contradicted every public health signal.",
+    "scenes": [
+      {
+        "id": "setup",
+        "role": "setup",
+        "title": "Web checks stayed green",
+        "summary": "Public API checks returned 200 while the SSH monitor failed.",
+        "evidence_ids": ["artifact_health"],
+        "visual": { "layout": "signal-field", "camera": "slow-push", "emphasis": "quiet" },
+        "interactions": [
+          { "region": "origin", "action": "reveal", "label": "Original signal", "content": "Three independent public checks remained healthy." },
+          { "region": "proof", "action": "expand", "label": "HTTP evidence", "content": "The public onboarding endpoint returned HTTP 200.", "evidence_id": "artifact_health" }
+        ]
+      },
+      {
+        "id": "conflict",
+        "role": "conflict",
+        "title": "The alert would not stop",
+        "summary": "The checker repeatedly attempted a management port that had already been retired.",
+        "evidence_ids": ["artifact_alert"],
+        "visual": { "layout": "split-proof", "camera": "track", "emphasis": "high" },
+        "interactions": [
+          { "region": "judgment", "action": "compare", "label": "Contradiction", "content": "Healthy service traffic and a failed legacy TCP check could both be true." },
+          { "region": "consequence", "action": "focus", "label": "Operational cost", "content": "Every cycle generated another false production incident." }
+        ]
+      },
+      {
+        "id": "turn",
+        "role": "turn",
+        "title": "Treat the monitor as the suspect",
+        "summary": "The agent compared the documented management entry with the fixed alert rule.",
+        "decision_source": "trace_summary",
+        "evidence_ids": ["artifact_diff"],
+        "visual": { "layout": "comparison", "camera": "reveal", "emphasis": "high" }
+      },
+      {
+        "id": "payoff",
+        "role": "payoff",
+        "title": "Signal restored",
+        "summary": "The next cycle used the correct entry and the false incident disappeared.",
+        "evidence_ids": ["artifact_diff"],
+        "visual": { "layout": "timeline", "camera": "slow-push", "emphasis": "normal" }
+      }
+    ]
+  },
+  "presentation": {
+    "preset": "cinematic",
+    "viewer_can_switch": true,
+    "available_presets": ["cinematic", "briefing", "investigation"],
+    "theme": {
+      "accent": "#20B486",
+      "surface": "#F7F9FC",
+      "ink": "#101318",
+      "muted": "#626B76",
+      "font": "system"
+    },
+    "motion": { "pace": "measured", "transition": "signal", "intensity": 0.72 }
+  },
+  "evidence": [
+    { "id": "artifact_health", "type": "test_report", "label": "Public endpoint health", "sha256": "1111111111111111111111111111111111111111111111111111111111111111" },
+    { "id": "artifact_alert", "type": "log_excerpt", "label": "Repeated legacy-port alert", "sha256": "2222222222222222222222222222222222222222222222222222222222222222" },
+    { "id": "artifact_diff", "type": "diff", "label": "Audit entry correction", "sha256": "3333333333333333333333333333333333333333333333333333333333333333" }
+  ],
+  "provenance": { "trust_level": "instrumented", "raw_trace_policy": "local_only", "owner_approved": true }
+}

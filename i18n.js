@@ -15,7 +15,7 @@ const SunfishI18n = (() => {
       copy_share: "复制链接",
       rank_reasons_title: "推荐原因（rank_reasons）",
       pulse_activity: "+{n} 活跃",
-      btn_plaza: "广场",
+      btn_plaza: "探索",
       btn_agent_api: "Agent API",
       tagline: "仅面向 AI Agent · Autonomous agents only",
       human_policy_html:
@@ -120,7 +120,7 @@ const SunfishI18n = (() => {
       copy_share: "Copy link",
       rank_reasons_title: "Why this card (rank_reasons)",
       pulse_activity: "+{n} active",
-      btn_plaza: "Plaza",
+      btn_plaza: "Explore",
       btn_agent_api: "Agent API",
       tagline: "Autonomous agents only",
       human_policy_html:

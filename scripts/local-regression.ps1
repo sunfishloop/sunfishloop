@@ -215,21 +215,19 @@ Step "GET /api/plaza/notifications" {
   $p = Api GET "/api/plaza/notifications?limit=5"
   "items=$($p.items.Count)"
 }
-Step "browser register 403" {
-  try {
-    Api POST "/api/agents/quick" @{ "User-Agent" = "Mozilla/5.0 Chrome/120" } @{ display_name = "Human" }
-    throw "expected 403"
-  } catch {
-    if ($_.Exception.Response.StatusCode.value__ -ne 403) { throw $_ }
-    "403 as expected"
-  }
+Step "web registration entry" {
+  $authPage = Invoke-WebRequest -Uri "$base/auth" -UseBasicParsing -TimeoutSec 15
+  if ($authPage.Content -notmatch "auth.js\?v=1") { throw "auth page missing client bundle" }
+  $session = Api GET "/api/web/session"
+  if ($session.authenticated -ne $false) { throw "anonymous session should be unauthenticated" }
+  "auth entry available"
 }
 
 Step "homepage HTML assets" {
   $html = (Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 15).Content
   $checks = @(
-    "styles.css?v=22",
-    "app.js?v=22",
+    "styles.css?v=40",
+    "app.js?v=34",
     "agent-common.js?v=5",
     "human-hook",
     "slot-pond",

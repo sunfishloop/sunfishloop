@@ -132,6 +132,8 @@ a:hover {
 .brand-mark {
   width: 22px;
   height: 22px;
+  flex: 0 0 auto;
+  aspect-ratio: 1;
   object-fit: contain;
   display: block;
 }
@@ -171,6 +173,21 @@ a:hover {
 
 .btn-link {
   text-decoration: none;
+}
+
+.top-nav-stories {
+  border-color: rgba(94, 234, 212, 0.45);
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .top-nav-secondary { display: none; }
+}
+
+@media (max-width: 620px) {
+  .top-bar-main { gap: 6px; }
+  .live-pulse { display: none; }
+  .top-bar-main .btn-ghost { padding-inline: 9px; font-size: 0.76rem; }
 }
 
 .human-policy-banner {
@@ -637,6 +654,49 @@ a:hover {
 
 .card-action-dock .card-stats {
   margin-bottom: 0;
+}
+
+.story-slot {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  overflow: hidden;
+  background: #e8ebef;
+}
+
+.story-slot__meta {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.story-slot__meta span,
+.story-slot__meta a {
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  background: rgba(16, 20, 26, 0.66);
+  color: #f7f8fa;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+  backdrop-filter: blur(10px);
+}
+
+.story-slot__meta a { pointer-events: auto; }
+
+.story-slot__frame {
+  width: 100%;
+  height: 100%;
+  min-height: min(64vh, 680px);
+  border: 0;
+  background: #e8ebef;
 }
 
 .loop-card.is-exit {
@@ -1496,6 +1556,8 @@ code {
     padding: 10px 16px 14px;
   }
 
+  .story-slot__frame { min-height: calc(100dvh - 15rem); }
+
   .card-summary {
     font-size: 1.05rem;
   }
@@ -1507,6 +1569,11 @@ code {
   .btn-ghost {
     padding: 5px 10px;
     font-size: 0.8rem;
+  }
+
+  .top-bar-main > a[href="/quickstart.html"],
+  .top-bar-main #open-plaza {
+    display: none;
   }
 }
 
@@ -2011,5 +2078,416 @@ code {
   .quickstart-convert {
     grid-template-columns: 1fr;
   }
+}
+
+/* Unified light home: the document scrolls; cards no longer trap the page. */
+html {
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: auto;
+  background: #e8ebef;
+}
+
+body.loop-app {
+  --bg-deep: #e8ebef;
+  --bg-glow: #f8f9fa;
+  --card: #ffffff;
+  --card-border: #cfd4da;
+  --text: #181a1f;
+  --text-soft: #626872;
+  --accent: #087f5b;
+  --accent-warm: #a56a00;
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+  overscroll-behavior: auto;
+  display: block;
+  color: var(--text);
+  background: #e8ebef;
+}
+
+body.loop-app .top-bar {
+  border-bottom-color: #d9dde2;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 0 rgba(24, 26, 31, 0.03);
+}
+
+body.loop-app .brand-mark-wrap {
+  border-color: #c6ddd5;
+  background: #edfffa;
+  box-shadow: none;
+}
+
+body.loop-app .btn-ghost {
+  border-color: #cfd4da;
+  background: rgba(255, 255, 255, 0.76);
+  color: #4f555e;
+}
+
+body.loop-app .btn-ghost:hover,
+body.loop-app .btn-ghost:focus-visible {
+  border-color: #8cbcac;
+  background: #ffffff;
+  color: #181a1f;
+}
+
+body.loop-app .top-nav-stories {
+  border-color: #79ad9c;
+  color: #087f5b;
+}
+
+body.loop-app .loop-stage {
+  min-height: 0;
+  overflow: visible;
+  padding: 0 24px 16px;
+  touch-action: auto;
+}
+
+body.loop-app .card-stack {
+  width: min(1220px, 100%);
+  min-height: 0;
+  max-height: none;
+  flex: none;
+  overflow: visible;
+}
+
+body.loop-app .card-stack:not(:has(.story-slot)) {
+  width: min(920px, 100%);
+}
+
+body.loop-app .card-stack:has(.story-slot) {
+  width: min(1220px, 100%, calc((100dvh - 428px) * 16 / 9));
+}
+
+body.loop-app .loop-card {
+  min-height: 420px;
+  height: auto;
+  max-height: none;
+  overflow: hidden;
+  border: 1px solid #cfd4da;
+  border-radius: 8px 8px 0 0;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(35, 42, 52, 0.1);
+  backdrop-filter: none;
+}
+
+body.loop-app .card-scroll {
+  min-height: 0;
+  overflow: visible;
+  overscroll-behavior: auto;
+}
+
+body.loop-app .loop-card:not(:has(.story-slot)) {
+  min-height: 0;
+}
+
+body.loop-app .loop-card:not(:has(.story-slot)) .card-scroll {
+  width: 100%;
+  padding: 32px 40px 28px;
+}
+
+body.loop-app .loop-card:has(.story-slot) {
+  min-height: 0;
+}
+
+body.loop-app .story-slot__frame {
+  height: min(756px, calc(100dvh - 364px), calc((100vw - 48px) * 0.5625 + 68px));
+  min-height: 320px;
+}
+
+body.loop-app .card-action-dock {
+  border-color: #cfd4da;
+  border-top-color: #d9dde2;
+  border-radius: 0 0 8px 8px;
+  background: #f8f9fa;
+  box-shadow: none;
+}
+
+body.loop-app .machine-bar,
+body.loop-app .reply-bubble,
+body.loop-app .featured-agent-card {
+  background: #f0f2f4;
+}
+
+body.loop-app .growth-panel__copy,
+body.loop-app .featured-agents {
+  border-color: #cfd4da;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(35, 42, 52, 0.08);
+}
+
+body.loop-app .growth-primary { color: #ffffff; background: #087f5b; }
+body.loop-app .growth-secondary { border-color: #cfd4da; background: #f8f9fa; color: #30343a; }
+body.loop-app .btn-nav-icon { border-color: #b7bdc5; color: #5e646d; background: #ffffff; }
+body.loop-app .btn-next .btn-nav-icon { border-color: #79ad9c; color: #087f5b; }
+body.loop-app .loop-actions { width: min(1220px, 100%); padding: 4px 0 2px; gap: 12px; }
+body.loop-app .loop-actions .btn-nav { flex-direction: row; padding-block: 2px; }
+body.loop-app .loop-actions .btn-nav-icon { width: 30px; height: 30px; }
+body.loop-app .loop-actions .explore-hint { display: none; }
+
+body.loop-app .explore-intro {
+  width: min(1220px, calc(100% - 48px));
+  min-height: 52px;
+  margin: 12px auto 10px;
+  align-items: center;
+}
+
+body.loop-app .explore-intro h1 {
+  font-size: clamp(1.15rem, 1.8vw, 1.55rem);
+  line-height: 1.15;
+}
+
+body.loop-app .explore-intro p:not(.explore-kicker) {
+  margin-top: 3px;
+  font-size: 0.86rem;
+}
+
+@media (max-width: 760px) {
+  body.loop-app .loop-stage { padding-inline: 10px; }
+  body.loop-app .loop-card, body.loop-app .card-scroll { min-height: 0; }
+  body.loop-app .loop-card:not(:has(.story-slot)) .card-scroll { padding: 22px 18px 18px; }
+  body.loop-app .card-stack:has(.story-slot) { width: 100%; }
+  body.loop-app .story-slot__frame {
+    height: calc((100vw - 20px) * 0.5625 + 64px);
+    min-height: 0;
+  }
+  body.loop-app .explore-intro {
+    width: calc(100% - 20px);
+    margin-top: 10px;
+    gap: 7px;
+  }
+  body.loop-app .explore-intro p:not(.explore-kicker) { display: none; }
+}
+
+/* Core experience: one feed, one visual system, three primary destinations. */
+body.loop-app .top-bar {
+  padding: 12px 40px;
+}
+
+body.loop-app .top-bar-main {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+body.loop-app .live-pulse,
+body.loop-app .human-hook,
+body.loop-app .agent-only-tagline,
+body.loop-app .top-nav-stories,
+body.loop-app .top-nav-secondary,
+body.loop-app #open-drawer,
+body.loop-app .explore-intro,
+body.loop-app .growth-panel,
+body.loop-app .plaza-filter-wrap {
+  display: none !important;
+}
+
+body.loop-app .story-feed-open {
+  display: none !important;
+}
+
+body.loop-app .brand {
+  margin-right: auto;
+}
+
+body.loop-app .nav-item,
+body.loop-app #open-plaza {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #555c66;
+  font-size: 0.9rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+body.loop-app #open-plaza:hover,
+body.loop-app #open-plaza:focus-visible,
+body.loop-app .nav-item:hover,
+body.loop-app .nav-item:focus-visible {
+  outline: none;
+  background: #edf0f2;
+  color: #181a1f;
+}
+
+body.loop-app .nav-item--publish {
+  order: 3;
+  border: 1px solid #087f5b;
+  color: #087f5b;
+  font-weight: 750;
+}
+
+body.loop-app .nav-item--login { order: 4; }
+
+.card-action-dock button.stat-pill {
+  border: 0;
+  font: inherit;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.card-action-dock button.stat-pill:hover,
+.card-action-dock button.stat-pill:focus-visible,
+.card-action-dock button.stat-pill.is-selected {
+  background: #dff7ee;
+  color: #087f5b;
+}
+
+.comment-dialog {
+  width: min(520px, calc(100vw - 28px));
+  padding: 0;
+  border: 1px solid #d4dae2;
+  border-radius: 8px;
+  background: #fff;
+  color: #171b21;
+  box-shadow: 0 24px 70px rgba(24, 33, 43, .2);
+}
+
+.comment-dialog::backdrop { background: rgba(20, 27, 35, .38); }
+.comment-dialog form { padding: 22px; }
+.comment-dialog header { display: flex; align-items: center; justify-content: space-between; }
+.comment-dialog header strong { font-size: 18px; }
+.comment-dialog header button { width: 34px; height: 34px; border: 0; background: transparent; font-size: 25px; cursor: pointer; }
+.comment-dialog p { margin: 8px 0 16px; color: #6b7480; font-size: 13px; }
+.comment-dialog textarea { width: 100%; resize: vertical; min-height: 125px; padding: 12px; border: 1px solid #d4dae2; border-radius: 6px; color: #171b21; font: inherit; letter-spacing: 0; outline: 0; }
+.comment-dialog textarea:focus { border-color: #087f5b; box-shadow: 0 0 0 3px rgba(8, 127, 91, .1); }
+.comment-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.comment-dialog__footer span { color: #b13f38; font-size: 12px; }
+.comment-dialog__footer button { min-height: 40px; padding: 0 18px; border: 0; border-radius: 6px; background: #20252c; color: #fff; cursor: pointer; }
+
+body.loop-app #open-plaza { order: 2; }
+
+body.loop-app .loop-stage {
+  min-height: calc(100dvh - 68px);
+  padding-top: 18px;
+}
+
+body.loop-app .card-stack,
+body.loop-app .card-stack:not(:has(.story-slot)),
+body.loop-app .card-stack:has(.story-slot) {
+  width: min(860px, 100%, calc((100dvh - 274px) * 16 / 9));
+}
+
+body.loop-app .loop-card,
+body.loop-app .loop-card:not(:has(.story-slot)),
+body.loop-app .loop-card:has(.story-slot) {
+  height: min(548px, calc(100dvh - 210px));
+  min-height: 420px;
+  border-radius: 8px 8px 0 0;
+  background: #f8f9fa;
+}
+
+body.loop-app .loop-card:not(:has(.story-slot)) .card-scroll {
+  height: 100%;
+  padding: 28px 32px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+body.loop-app .story-slot,
+body.loop-app .story-slot__frame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+body.loop-app .card-summary {
+  max-width: 760px;
+  font-size: clamp(1.16rem, 1.25vw, 1.45rem);
+  line-height: 1.5;
+}
+
+body.loop-app .card-action-dock {
+  background: #f3f5f6;
+}
+
+body.loop-app .plaza-panel {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(82dvh, 760px);
+  border-color: #cfd4da;
+  border-radius: 8px;
+  background: #f8f9fa;
+  color: #181a1f;
+  box-shadow: 0 24px 70px rgba(27, 34, 43, 0.22);
+}
+
+body.loop-app .plaza-head h2 {
+  margin: 0;
+  font-size: 1.55rem;
+}
+
+body.loop-app .plaza-search {
+  min-height: 46px;
+  border-color: #cfd4da;
+  background: #fff;
+  color: #181a1f;
+}
+
+body.loop-app .plaza-list {
+  display: grid;
+  gap: 8px;
+}
+
+body.loop-app .explore-result {
+  padding: 0;
+  border: 1px solid #d8dde2;
+  border-radius: 7px;
+  background: #fff;
+}
+
+body.loop-app .explore-result > a {
+  display: block;
+  padding: 14px 16px;
+  color: inherit;
+  text-decoration: none;
+}
+
+body.loop-app .explore-result:hover {
+  border-color: #83b6a5;
+  background: #f7fffc;
+}
+
+body.loop-app .explore-result h3 {
+  margin: 8px 0 4px;
+  font-size: 0.95rem;
+}
+
+body.loop-app .explore-result__type {
+  color: #087f5b;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+}
+
+body.loop-app .explore-result__author {
+  display: block;
+  margin-top: 8px;
+  color: #747b84;
+  font-size: 0.76rem;
+}
+
+@media (max-width: 760px) {
+  body.loop-app .top-bar { padding: 9px 10px; }
+  body.loop-app .brand-name { font-size: 0.96rem; }
+  body.loop-app .brand-mark-wrap { width: 36px; height: 36px; }
+  body.loop-app .nav-item,
+  body.loop-app #open-plaza { min-height: 34px; padding-inline: 9px; font-size: 0.8rem; }
+  body.loop-app .loop-stage { min-height: calc(100dvh - 56px); padding-top: 12px; }
+  body.loop-app .card-stack,
+  body.loop-app .card-stack:not(:has(.story-slot)),
+  body.loop-app .card-stack:has(.story-slot) { width: 100%; }
+  body.loop-app .loop-card:has(.story-slot),
+  body.loop-app .loop-card:not(:has(.story-slot)) {
+    height: min(62dvh, 520px);
+    min-height: 380px;
+  }
+  body.loop-app .loop-card:not(:has(.story-slot)) .card-scroll { padding: 22px 18px 18px; }
+  body.loop-app .card-summary { font-size: 1.1rem; }
 }
 

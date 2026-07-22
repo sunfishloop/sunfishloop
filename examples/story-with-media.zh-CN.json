@@ -1,0 +1,108 @@
+{
+  "spec_version": "sunfish.story/0.1",
+  "id": "story_demo_signal_recovered_zh",
+  "visibility": "public",
+  "run": {
+    "source_run_id": "ops-audit-demo-2026-07-22",
+    "source_format": "sunfish",
+    "agent": {
+      "id": "codexops",
+      "name": "CodexOps",
+      "kind": "operations",
+      "runtime": "Codex",
+      "model": "GPT",
+      "tools": ["HTTP health check", "SSH", "log audit"]
+    },
+    "goal": "找出生产服务正常但监控持续告警的原因。",
+    "outcome": "Agent 找到了过期的管理入口，修正规则并验证告警恢复。",
+    "status": "succeeded",
+    "metrics": {
+      "duration_ms": 284000,
+      "token_count": 3610,
+      "cost_usd": null
+    }
+  },
+  "story": {
+    "title": "服务器没有故障，出错的是观察它的方式。",
+    "hook": "所有公开接口都返回正常，但告警每十分钟仍会响起。",
+    "scenes": [
+      {
+        "id": "signal",
+        "role": "setup",
+        "title": "一个互相矛盾的信号",
+        "summary": "外部请求持续成功，内部监控却坚持认为服务器已经离线。",
+        "evidence_ids": ["public-health"],
+        "visual": {"layout": "signal-field", "camera": "slow-push", "emphasis": "quiet"},
+        "media": {
+          "image": {"src": "/assets/stories/signal-recovered.webp", "alt": "服务器机房中的多条诊断路径，一条青绿色路径最终恢复正常", "bytes": 37572, "fit": "cover", "position": "center", "opacity": 0.9, "treatment": "cinematic"},
+          "audio": {"src": "/assets/stories/signal-room.mp3?v=2", "label": "低频诊断环境音", "bytes": 264717, "kind": "ambient", "volume": 0.42, "loop": true, "fade_in_ms": 1200, "fade_out_ms": 900}
+        },
+        "interactions": [
+          {"region": "origin", "action": "reveal", "label": "矛盾从哪里开始", "content": "公开健康检查连续成功，只有固定端口探测失败。"},
+          {"region": "proof", "action": "expand", "label": "查看证据", "content": "三个公开接口在同一时间窗口内均返回 HTTP 200。", "evidence_id": "public-health"}
+        ]
+      },
+      {
+        "id": "wrong-path",
+        "role": "conflict",
+        "title": "告警敲错了门",
+        "summary": "检查器仍在访问已经退役的管理端口，因此每一次检测都会制造一次假故障。",
+        "evidence_ids": ["audit-log"],
+        "visual": {"layout": "split-proof", "camera": "track", "emphasis": "high"},
+        "media": {
+          "image": {"src": "/assets/stories/signal-recovered.webp", "alt": "诊断图中橙色错误路径与青绿色正确路径形成对比", "bytes": 37572, "fit": "cover", "position": "64% 45%", "opacity": 0.86, "treatment": "monochrome"},
+          "audio": {"src": "/assets/stories/signal-room.mp3?v=2", "label": "低频诊断环境音", "bytes": 264717, "kind": "ambient", "volume": 0.38, "loop": true, "fade_in_ms": 500, "fade_out_ms": 500}
+        },
+        "interactions": [
+          {"region": "judgment", "action": "compare", "label": "真正的冲突", "content": "服务健康与旧端口不可达可以同时成立。"},
+          {"region": "consequence", "action": "focus", "label": "错误的代价", "content": "每个循环都生成新的假告警，真正异常反而更难被看见。"}
+        ]
+      },
+      {
+        "id": "decision",
+        "role": "turn",
+        "title": "先怀疑监控，再怀疑生产",
+        "summary": "Agent 将文档中的管理入口与检查脚本逐项对照，定位到唯一不一致的端口。",
+        "decision_source": "trace_summary",
+        "evidence_ids": ["rule-diff"],
+        "visual": {"layout": "comparison", "camera": "reveal", "emphasis": "high"},
+        "media": {
+          "image": {"src": "/assets/stories/signal-recovered.webp", "alt": "青绿色诊断路径越过错误节点并接近恢复标记", "bytes": 37572, "fit": "cover", "position": "72% 48%", "opacity": 0.94, "treatment": "cinematic"},
+          "audio": {"src": "/assets/stories/signal-room.mp3?v=2", "label": "低频诊断环境音", "bytes": 264717, "kind": "ambient", "volume": 0.45, "loop": true, "fade_in_ms": 350, "fade_out_ms": 500}
+        },
+        "interactions": [
+          {"region": "judgment", "action": "reveal", "label": "Agent 的判断", "content": "业务证据一致时，应优先验证观察链路本身。"},
+          {"region": "proof", "action": "expand", "label": "规则差异", "content": "当前管理入口与脚本中的固定端口不一致。", "evidence_id": "rule-diff"}
+        ]
+      },
+      {
+        "id": "recovered",
+        "role": "payoff",
+        "title": "信号恢复",
+        "summary": "规则修正后，下一轮检测通过；生产服务没有重启，也没有发生流量中断。",
+        "evidence_ids": ["rule-diff"],
+        "visual": {"layout": "timeline", "camera": "slow-push", "emphasis": "normal"},
+        "media": {
+          "image": {"src": "/assets/stories/signal-recovered.webp", "alt": "青绿色路径抵达恢复标记，错误告警路径淡出", "bytes": 37572, "fit": "cover", "position": "right", "opacity": 0.96, "treatment": "natural"},
+          "audio": {"src": "/assets/stories/signal-room.mp3?v=2", "label": "低频诊断环境音", "bytes": 264717, "kind": "ambient", "volume": 0.38, "loop": true, "fade_in_ms": 350, "fade_out_ms": 1200}
+        },
+        "interactions": [
+          {"region": "consequence", "action": "focus", "label": "最终变化", "content": "监控重新反映真实状态，后续告警可以被认真对待。"}
+        ]
+      }
+    ]
+  },
+  "presentation": {
+    "preset": "cinematic",
+    "viewer_can_switch": true,
+    "available_presets": ["cinematic", "briefing", "investigation"],
+    "theme": {"accent": "#20B486", "surface": "#F5F7FA", "ink": "#101318", "muted": "#68717C", "font": "system"},
+    "motion": {"pace": "measured", "transition": "signal", "intensity": 0.76}
+  },
+  "evidence": [
+    {"id": "public-health", "type": "test_report", "label": "公开健康检查", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+    {"id": "audit-log", "type": "log_excerpt", "label": "重复出现的旧入口告警", "sha256": "2222222222222222222222222222222222222222222222222222222222222222"},
+    {"id": "rule-diff", "type": "diff", "label": "管理入口修正规则", "sha256": "3333333333333333333333333333333333333333333333333333333333333333"}
+  ],
+  "provenance": {"trust_level": "instrumented", "raw_trace_policy": "local_only", "owner_approved": true}
+}

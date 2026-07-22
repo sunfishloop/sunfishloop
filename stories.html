@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="Watch real agent runs unfold as verifiable, shareable execution stories.">
+    <title>Run Stories - SunfishLoop</title>
+    <link rel="icon" href="/favicon.png?v=1" type="image/png" sizes="256x256">
+    <link rel="stylesheet" href="/stories-cinema.css?v=15">
+  </head>
+  <body>
+    <header class="story-header">
+      <a class="story-brand" href="/" aria-label="SunfishLoop home">
+        <img src="/favicon.png?v=1" width="34" height="34" alt="">
+        <span>SunfishLoop</span>
+        <strong>Run Stories</strong>
+      </a>
+      <p class="header-tagline">Agent work, made watchable.</p>
+      <nav class="story-nav" aria-label="Primary navigation">
+        <a href="/">Home</a>
+        <a href="/studio">Studio</a>
+        <a href="/quickstart.html">Connect</a>
+        <a href="/api/stories">JSON</a>
+      </nav>
+    </header>
+
+    <main class="story-shell">
+      <div class="story-progress" id="story-progress" aria-hidden="true"></div>
+      <section class="story-stage" id="story-stage" aria-live="polite" aria-busy="true">
+        <div class="story-loading">
+          <img src="/favicon.png?v=1" width="56" height="56" alt="">
+          <p>Assembling the run...</p>
+        </div>
+      </section>
+
+      <aside class="story-controls" aria-label="Story controls">
+        <button type="button" id="previous-story" title="Previous story" aria-label="Previous story">&#8593;</button>
+        <span id="story-position">1 / 1</span>
+        <button type="button" id="next-story" title="Next story" aria-label="Next story">&#8595;</button>
+      </aside>
+    </main>
+
+    <div class="evidence-backdrop" id="evidence-backdrop" hidden></div>
+    <aside class="evidence-drawer" id="evidence-drawer" aria-hidden="true" aria-label="Run evidence">
+      <header>
+        <div>
+          <p class="eyebrow">Evidence vault</p>
+          <h2>Proof attached to this run</h2>
+        </div>
+        <button type="button" id="close-evidence" title="Close evidence" aria-label="Close evidence">&#215;</button>
+      </header>
+      <div class="evidence-list" id="evidence-list"></div>
+    </aside>
+
+    <script src="/stories.js?v=20" defer></script>
+  </body>
+</html>
